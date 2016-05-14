@@ -1,6 +1,8 @@
 # coding: utf-8
 import time
 import threading
+import logging
+import logging.config
 
 # import serial
 # from serial.threaded import Packetizer, ReaderThread
@@ -15,20 +17,15 @@ PACKET_READY = 2
 MAX_QUEUE_OUT_LEN = 3
 MAX_QUEUE_IN_LEN = 2
 
-
-# mfrom = lambda msg: msg[:2]
-# mto = lambda msg: msg[2:4]
-# mmsg = lambda msg: msg[4:6]
-# mlen = lambda msg: int(msg[6:8])
-# mdata = lambda msg: msg[8:8+mlen(msg)]
-# mcrc = lambda msg: msg[-4:]
+FORMAT = '%(asctime)-15s %(levelname)s [%(node)s] : %(message)s'
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
 
 class NullPort(object):
     is_open = True
     in_waiting = 0
 
     def __init__(self):
-        print 'Init NullPort'
+        logging.info('Init NULL PORT')
 
     def open(self):
         pass
@@ -56,16 +53,19 @@ class Packet(object):
     data = ''
     length = ''
     crc = ''
-    retry = 0
 
     def __init__(self, source=None, dest=None, data=None, packet_id=None, length=None, crc=None):
-        if source is not None and dest is not None and id is not None:
+        self.retry = 0
+        if source is not None and dest is not None and data is not None:
             self.source = source
             self.dest = dest
             self.packet_id = self.id_calculate() if packet_id is None else packet_id
             self.data = data
             self.length = len(data) if length is None else length
             self.crc = self.crc_calculate() if crc is None else crc
+
+    def __str__(self):
+        return str(self.__dict__)
 
     def __eq__(self, other):
         return self.serialize() == other.serialize()
@@ -94,12 +94,12 @@ class Packet(object):
 
     def serialize(self):
         msg = '{source:c}{dest:c}{id:0>2}{len:c}{data}{crc}{eom}'.format(source=self.source,
-                                                                            dest=self.dest,
-                                                                            id=self.packet_id,
-                                                                            len=self.length,
-                                                                            data=self.data,
-                                                                            crc=self.crc,
-                                                                            eom=self.EOM)
+                                                                         dest=self.dest,
+                                                                         id=self.packet_id,
+                                                                         len=self.length,
+                                                                         data=self.data,
+                                                                         crc=self.crc,
+                                                                         eom=self.EOM)
         return bytearray(msg)
 
 
@@ -121,38 +121,60 @@ class MM485(threading.Thread):
         self._msg = None
         self._msg_in = None
         self._crc_in = 0
+        extra = {'node': node_id}
+        logger = logging.getLogger(__name__)
+        self.logger = logging.LoggerAdapter(logger, extra)
+        self.extra = {'node': node_id}
 
     def parse_packet(self, packet):
-        pass
+        self.logger.info('Indentification for msg %s', packet.serialize())
+        return 'ACK'
 
-    def parse_queues(self):
+    def parse_queue_in(self):
         with self.lock:
+            if self.queue_in:
+                self.logger.debug("Parse queue in: %s", [str(q) for q in self.queue_in])
             pkt_received = list(self.queue_in)
             for pkt_in in pkt_received:
                 pkt_ack = [pkt_out for pkt_out in self.queue_out if pkt_in.packet_id == pkt_out.packet_id]
                 if pkt_ack:
+                    self.logger.info('Received %s as ack for %s', pkt_in.serialize(), pkt_ack[0].serialize())
                     self.queue_out.remove(pkt_ack[0])
-                    self.queue_in.remove(pkt_in)
                 else:
-                    self.parse_packet(pkt_in)
+                    packet = Packet(source=self._node_id,
+                                    dest=pkt_in.source,
+                                    data=self.parse_packet(pkt_in),
+                                    packet_id=pkt_in.packet_id)
+                    self.logger.info('Found reply %s', packet.data)
+                    self.write(packet)
+                self.queue_in.remove(pkt_in)
 
-    def send_packets(self):
+    def parse_queue_out(self):
         with self.lock:
+            if self.queue_out:
+                self.logger.debug("Parse queue out: %s", [str(q) for q in self.queue_out])
             for pkt in self.queue_out:
                 if self.wait_for_bus():
-                    msg = pkt.serialize()
-                    print self._node_id, '>', msg, pkt.retry
-                    self._port.write(msg)
+                    self.write(pkt)
                 else:
+                    self.logger.info("Bus is busy")
                     pkt.retry += 1  # TODO: Test retry
 
+    def write(self, pkt):
+        msg = pkt.serialize()
+        self.logger.info("Send msg %s - Retry:%s", msg, pkt.retry)
+        self._port.write(msg)
+
     def handle_packet(self, packet):
-        print self._node_id, '<', packet
+        self.logger.info("Received msg %s", packet)
         pkt = Packet().deserialize(packet)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN and pkt.validate() and pkt.dest == self._node_id:
             if pkt not in self.queue_in:
+                self.logger.info('Add packet to input queue')
                 with self.lock:
                     self.queue_in.append(pkt)
+        else:
+            self.logger.info('Packet is invalid')
 
     def data_received(self, data):
         """Buffer received data, find TERMINATOR, call handle_packet"""
@@ -166,8 +188,8 @@ class MM485(threading.Thread):
             try:
                 data = self._port.read(self._port.in_waiting or 1)  # blocking
                 self.data_received(data)
-                self.parse_queues()
-                self.send_packets()
+                self.parse_queue_in()
+                self.parse_queue_out()
                 time.sleep(0.01)
             except Exception as e:
                 print e
@@ -182,7 +204,8 @@ class MM485(threading.Thread):
         if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
             with self.lock:
                 packet = Packet(self._node_id, to, data, msg_id)
-                self.queue_out.append(packet)
+                if packet not in self.queue_out:
+                    self.queue_out.append(packet)
 
     # wait until no chars in buffer or TIMEOUT
     # return buffer's chars number
@@ -191,41 +214,3 @@ class MM485(threading.Thread):
         while self._port.in_waiting != 0 and time.time() - start < MAX_WAIT:
             time.sleep(0.01)
         return self._port.in_waiting == 0
-
-    # wait until packet in buffer or TIMEOUT
-    # return buffer's chars number
-    def wait_for_packet(self):
-        start = time.time()
-        while len(self.queue_in) == 0 and time.time() - start < MAX_WAIT:
-            time.sleep(0.01)
-        return len(self.queue_in) > 0
-
-
-if __name__ == '__main__':
-    p = Packet('01', '02', '01', 'Pippo')
-    print p.serialize()
-    #    ser = serial.serial_for_url('/dev/ttyUSB0')
-    ser = NullPort()
-    a = MM485('01', ser)
-    #    ser = serial.serial_for_url('/dev/ttyUSB1')
-    #    ser = NullPort()
-    #    b = MM485('02', ser)
-    a.daemon = True
-    #    b.daemon = True
-    #    a.start()
-    msg1 = '02010105Test100' + Packet.EOM
-    msg2 = '02010205Test200' + Packet.EOM
-    msg3 = '02010305Test300' + Packet.EOM
-    a.data_received(msg1 + msg2 + msg3)
-    assert len(a.queue_in) <= MAX_QUEUE_IN_LEN
-    assert a.send('02', 'test1')
-    assert a.send('02', 'test2')
-    assert a.send('02', 'test3')
-    #    a.join(1)
-    a.parse_queues()
-    assert len(a.queue_in) == 0
-    assert len(a.queue_out) == 1
-    a.send('02', 'xxxx')
-    a.parse_queues()
-    assert len(a.queue_in) == 0
-    assert len(a.queue_out) == 2

@@ -58,6 +58,6 @@ class TestMM485(unittest.TestCase):
         self.a.data_received(msg)
 
         # Query queues
-        self.a.parse_queues()
+        self.a.parse_queue_in()
         assert len(self.a.queue_in) == 0
         assert len(self.a.queue_out) == 0
