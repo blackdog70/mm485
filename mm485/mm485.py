@@ -17,7 +17,7 @@ PACKET_READY = 2
 MAX_QUEUE_OUT_LEN = 3
 MAX_QUEUE_IN_LEN = 2
 
-FORMAT = '%(asctime)-15s %(levelname)s [%(node)s] : %(message)s'
+FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
 logging.basicConfig(level=logging.DEBUG, format=FORMAT)
 
 class NullPort(object):
@@ -89,7 +89,7 @@ class Packet(object):
             self.data = msg[5:5 + self.length]
             self.crc = msg[-2:]
         except Exception as e:
-            pass
+            logging.warning("Message deserializing error: %s", msg, e)
         return self
 
     def serialize(self):
@@ -127,8 +127,11 @@ class MM485(threading.Thread):
         self.extra = {'node': node_id}
 
     def parse_packet(self, packet):
-        self.logger.info('Indentification for msg %s', packet.serialize())
+        self.logger.info('Querying for %s', packet.data)
         return 'ACK'
+
+    def parse_ack(self, packet):
+        pass
 
     def parse_queue_in(self):
         with self.lock:
@@ -138,15 +141,17 @@ class MM485(threading.Thread):
             for pkt_in in pkt_received:
                 pkt_ack = [pkt_out for pkt_out in self.queue_out if pkt_in.packet_id == pkt_out.packet_id]
                 if pkt_ack:
-                    self.logger.info('Received %s as ack for %s', pkt_in.serialize(), pkt_ack[0].serialize())
+                    self.logger.info('Received %s as ack for %s', pkt_in.data, pkt_ack[0].data)
+                    self.parse_ack(pkt_in)
                     self.queue_out.remove(pkt_ack[0])
                 else:
                     packet = Packet(source=self._node_id,
                                     dest=pkt_in.source,
                                     data=self.parse_packet(pkt_in),
                                     packet_id=pkt_in.packet_id)
-                    self.logger.info('Found reply %s', packet.data)
+                    self.logger.info('Found %s', packet.data)
                     self.write(packet)
+                self.logger.info('Msg completed')
                 self.queue_in.remove(pkt_in)
 
     def parse_queue_out(self):
@@ -162,15 +167,15 @@ class MM485(threading.Thread):
 
     def write(self, pkt):
         msg = pkt.serialize()
-        self.logger.info("Send msg %s - Retry:%s", msg, pkt.retry)
+        self.logger.info("Send %s [%s]", pkt.data, pkt.retry)
         self._port.write(msg)
 
     def handle_packet(self, packet):
-        self.logger.info("Received msg %s", packet)
+        self.logger.info("Received %s", packet)
         pkt = Packet().deserialize(packet)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN and pkt.validate() and pkt.dest == self._node_id:
             if pkt not in self.queue_in:
-                self.logger.info('Add packet to input queue')
+                self.logger.info('Add %s to input queue', pkt.data)
                 with self.lock:
                     self.queue_in.append(pkt)
         else:
@@ -192,7 +197,7 @@ class MM485(threading.Thread):
                 self.parse_queue_out()
                 time.sleep(0.01)
             except Exception as e:
-                print e
+                self.logger.warning("Error: %s", e)
         pass
 
     def join(self, timeout=None):

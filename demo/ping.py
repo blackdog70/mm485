@@ -11,6 +11,9 @@ class Ping(MM485):
                 msg = 'Pong'
         return msg
 
+    def parse_ack(self, packet):
+        pass
+
 if __name__ == '__main__':
     ser = serial.serial_for_url('/dev/ttyUSB0')
     a = Ping(1, ser)
@@ -23,6 +26,6 @@ if __name__ == '__main__':
     try:
         while True:
             a.send(2, 'Ping')
-            time.sleep(0.5)
+            # time.sleep(0.1)
     except KeyboardInterrupt:
         pass
