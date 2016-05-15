@@ -6,16 +6,15 @@ It is thinked to solve collisions by software, following this simple rules:
 
 * Before that Master send a packet, the input buffer has to be empty
 * For every packet sent by Master there will be a reply
+* If there is no reply the Master resend the message
 * Only the Master will take care for collisions
 
-The packet is composed by:
+A packet is composed by:
 
-* source            code for the master node
-* destination       code for destination node
-* id                identificator used to accomplish acknowledgment on message replying
-* data length       bytes used by data
-* data              message
-* crc               crc value
-* EOM               end of message
-
-id is the identificator used to accomplish acknowledgment on message replying
+* source: code for the master node
+* destination: code for destination node
+* id: identificator used to accomplish acknowledgment on message replying
+* data length: bytes used by data
+* data: message
+* crc: crc value
+* EOM: end of message
