@@ -16,9 +16,10 @@ PACKET_SEND = 1
 PACKET_READY = 2
 MAX_QUEUE_OUT_LEN = 3
 MAX_QUEUE_IN_LEN = 2
+MAX_DATA_SIZE = 20
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 class NullPort(object):
     is_open = True
@@ -45,7 +46,7 @@ class NullPort(object):
 #         return 0
 
 class Packet(object):
-    EOM = b'\255'  # End Of Message
+    EOM = chr(255)  # End Of Message
 
     source = ''
     dest = ''
@@ -59,9 +60,9 @@ class Packet(object):
         if source is not None and dest is not None and data is not None:
             self.source = source
             self.dest = dest
-            self.packet_id = self.id_calculate() if packet_id is None else packet_id
             self.data = data
             self.length = len(data) if length is None else length
+            self.packet_id = self.id_calculate() if packet_id is None else packet_id
             self.crc = self.crc_calculate() if crc is None else crc
 
     def __str__(self):
@@ -74,8 +75,9 @@ class Packet(object):
         return self.crc_calculate()
 
     def crc_calculate(self):
-        crc = hex(CRC16().calculate(str(self.dest) + str(self.length) + str(self.data)))[2:].rjust(4, '0')
-        return crc[2:].decode('hex') + crc[:2].decode('hex')
+        # TODO: dest e length convertiti a chr
+        crc = hex(CRC16(modbus_flag=True).calculate(str(self.dest) + str(self.length) + str(self.data)))[2:].rjust(4, '0')
+        return crc[:2].decode('hex') + crc[2:].decode('hex')
 
     def validate(self):
         return self.crc == self.crc_calculate()
@@ -93,7 +95,7 @@ class Packet(object):
         return self
 
     def serialize(self):
-        msg = '{source:c}{dest:c}{id:0>2}{len:c}{data}{crc}{eom}'.format(source=self.source,
+        msg = '{source:c}{dest:c}{id:0>2}{len:c}{data}{crc:0>2}{eom}'.format(source=self.source,
                                                                          dest=self.dest,
                                                                          id=self.packet_id,
                                                                          len=self.length,
@@ -171,7 +173,6 @@ class MM485(threading.Thread):
         self._port.write(msg)
 
     def handle_packet(self, packet):
-        self.logger.info("Received %s", packet)
         pkt = Packet().deserialize(packet)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN and pkt.validate() and pkt.dest == self._node_id:
             if pkt not in self.queue_in:
@@ -183,7 +184,9 @@ class MM485(threading.Thread):
 
     def data_received(self, data):
         """Buffer received data, find TERMINATOR, call handle_packet"""
-        self.buffer.extend(data)
+        if data:
+            self.logger.info("Received %s", data)
+            self.buffer.extend(data)
         while self.TERMINATOR in self.buffer:
             packet, self.buffer = self.buffer.split(self.TERMINATOR, 1)
             self.handle_packet(packet)
@@ -206,11 +209,14 @@ class MM485(threading.Thread):
             super(MM485, self).join(timeout)
 
     def send(self, to, data, msg_id=None):
-        if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
-            with self.lock:
-                packet = Packet(self._node_id, to, data, msg_id)
-                if packet not in self.queue_out:
-                    self.queue_out.append(packet)
+        if len(data) < 255:
+            if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
+                with self.lock:
+                    packet = Packet(self._node_id, to, data, msg_id)
+                    if packet not in self.queue_out:
+                        self.queue_out.append(packet)
+        else:
+            self.logger.critical("The data exceeds the maximum size of %s characters", MAX_DATA_SIZE)
 
     # wait until no chars in buffer or TIMEOUT
     # return buffer's chars number
