@@ -76,7 +76,7 @@ class Packet(object):
 
     def crc_calculate(self):
         # TODO: dest e length convertiti a chr
-        crc = hex(CRC16(modbus_flag=True).calculate(str(self.dest) + str(self.length) + str(self.data)))[2:].rjust(4, '0')
+        crc = hex(CRC16(modbus_flag=True).calculate(chr(self.dest) + chr(self.length) + str(self.data)))[2:].rjust(4, '0')
         return crc[:2].decode('hex') + crc[2:].decode('hex')
 
     def validate(self):
