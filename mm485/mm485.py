@@ -82,12 +82,12 @@ class Packet(object):
 
     def deserialize(self, msg):
         try:
-            self.source = ord(msg[0])
-            self.dest = ord(msg[1])
-            self.packet_id = ord(msg[2]) << 8 | ord(msg[3])
-            self.length = ord(msg[4])
+            self.source = msg[0]
+            self.dest = msg[1]
+            self.packet_id = msg[2] << 8 | msg[3]
+            self.length = msg[4]
             self.data = msg[5:5 + self.length]
-            self.crc = ord(msg[-3]) << 8 | ord(msg[-2])
+            self.crc = msg[-2] << 8 | msg[-1]
         except Exception as e:
             logging.warning("Message deserializing error: %s", msg, e)
         return self
@@ -173,20 +173,23 @@ class MM485(threading.Thread):
         self._port.write(msg)
 
     def handle_packet(self, packet):
+        self.logger.info('Check for packet %s', packet)
         pkt = Packet().deserialize(packet)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN and pkt.validate() and pkt.dest == self._node_id:
             if pkt not in self.queue_in:
                 self.logger.info('Add %s to input queue', pkt.data)
                 with self.lock:
                     self.queue_in.append(pkt)
+            else:
+                self.logger.info('Packet already in queue')
         else:
             self.logger.info('Packet is invalid')
 
     def data_received(self, data):
         """Buffer received data, find TERMINATOR, call handle_packet"""
         if data:
-            self.logger.info("Received %s", data)
             self.buffer.extend(data)
+            self.logger.info("Received %s", self.buffer)
         while self.TERMINATOR in self.buffer:
             packet, self.buffer = self.buffer.split(self.TERMINATOR, 1)
             self.handle_packet(packet)
