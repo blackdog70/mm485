@@ -75,32 +75,32 @@ class Packet(object):
         return self.crc_calculate()
 
     def crc_calculate(self):
-        # TODO: dest e length convertiti a chr
-        crc = hex(CRC16(modbus_flag=True).calculate(chr(self.dest) + chr(self.length) + str(self.data)))[2:].rjust(4, '0')
-        return crc[:2].decode('hex') + crc[2:].decode('hex')
+        return CRC16(modbus_flag=True).calculate(chr(self.dest) + chr(self.length) + str(self.data))
 
     def validate(self):
         return self.crc == self.crc_calculate()
 
     def deserialize(self, msg):
         try:
-            self.source = msg[0]
-            self.dest = msg[1]
-            self.packet_id = msg[2:4]
-            self.length = msg[4]
+            self.source = ord(msg[0])
+            self.dest = ord(msg[1])
+            self.packet_id = ord(msg[2]) << 8 | ord(msg[3])
+            self.length = ord(msg[4])
             self.data = msg[5:5 + self.length]
-            self.crc = msg[-2:]
+            self.crc = ord(msg[-3]) << 8 | ord(msg[-2])
         except Exception as e:
             logging.warning("Message deserializing error: %s", msg, e)
         return self
 
     def serialize(self):
+        crc = hex(self.crc_calculate())[2:].rjust(4, '0')
+        packet_id = hex(self.packet_id)[2:].rjust(4, '0')
         msg = '{source:c}{dest:c}{id:0>2}{len:c}{data}{crc:0>2}{eom}'.format(source=self.source,
                                                                          dest=self.dest,
-                                                                         id=self.packet_id,
+                                                                         id=packet_id[:2].decode('hex') + packet_id[2:].decode('hex'),
                                                                          len=self.length,
                                                                          data=self.data,
-                                                                         crc=self.crc,
+                                                                         crc=crc[:2].decode('hex') + crc[2:].decode('hex'),
                                                                          eom=self.EOM)
         return bytearray(msg)
 
@@ -161,7 +161,7 @@ class MM485(threading.Thread):
             if self.queue_out:
                 self.logger.debug("Parse queue out: %s", [str(q) for q in self.queue_out])
             for pkt in self.queue_out:
-                if self.wait_for_bus():
+                if self.bus_ready():
                     self.write(pkt)
                 else:
                     self.logger.info("Bus is busy")
@@ -220,7 +220,7 @@ class MM485(threading.Thread):
 
     # wait until no chars in buffer or TIMEOUT
     # return buffer's chars number
-    def wait_for_bus(self):
+    def bus_ready(self):
         start = time.time()
         while self._port.in_waiting != 0 and time.time() - start < MAX_WAIT:
             time.sleep(0.01)
