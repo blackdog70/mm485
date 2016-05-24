@@ -14,6 +14,7 @@ RAND_WAIT = 10
 ACK = b'\3'
 PACKET_SEND = 1
 PACKET_READY = 2
+PACKET_TIMEOUT = 2
 MAX_QUEUE_OUT_LEN = 3
 MAX_QUEUE_IN_LEN = 2
 MAX_DATA_SIZE = 20
@@ -57,6 +58,7 @@ class Packet(object):
 
     def __init__(self, source=None, dest=None, data=None, packet_id=None, length=None, crc=None):
         self.retry = 0
+        self.timeout = 0;
         if source is not None and dest is not None and data is not None:
             self.source = source
             self.dest = dest
@@ -161,8 +163,9 @@ class MM485(threading.Thread):
             if self.queue_out:
                 self.logger.debug("Parse queue out: %s", [str(q) for q in self.queue_out])
             for pkt in self.queue_out:
-                if self.bus_ready():
+                if self.bus_ready() and time.time() - pkt.timeout > PACKET_TIMEOUT:
                     self.write(pkt)
+                    pkt.timeout = time.time()
                 else:
                     self.logger.info("Bus is busy")
                     pkt.retry += 1  # TODO: Test retry
