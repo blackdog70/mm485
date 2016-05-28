@@ -48,7 +48,7 @@ class NullPort(object):
 #         return 0
 
 class Packet(object):
-    EOM = 0xff  # End Of Message
+    EOM = b'\xff'  # End Of Message
 
     source = ''
     dest = ''
@@ -62,9 +62,12 @@ class Packet(object):
         self.timeout = 0
         if source is not None and dest is not None and data is not None:
             self.source = source
-            self.dest = dest
-            self.data = bytearray(data, "utf-8")
-            self.length = len(data) if length is None else length
+            self.dest = bytes([dest])
+            if type(data) is str:
+                self.data = bytearray(data, "utf-8")
+            else:
+                self.data = data
+            self.length = bytes([len(data)]) if length is None else bytes([length])
             self.packet_id = self.id_calculate() if packet_id is None else packet_id
             self.crc = self.crc_calculate() if crc is None else crc
 
@@ -78,34 +81,26 @@ class Packet(object):
         return self.crc_calculate()
 
     def crc_calculate(self):
-        return CRC16(modbus_flag=True).calculate(chr(self.dest) + chr(self.length) + str(self.data))
+        crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
+        return bytearray(binascii.unhexlify(hex(crc)[2:]))
 
     def validate(self):
         return self.crc == self.crc_calculate()
 
     def deserialize(self, msg):
         try:
-            self.source = msg[0]
-            self.dest = msg[1]
-            self.packet_id = msg[2] << 8 | msg[3]
-            self.length = msg[4]
-            self.data = msg[5:5 + self.length]
-            self.crc = msg[-2] << 8 | msg[-1]
+            self.source = bytes([msg[0]])
+            self.dest = bytes([msg[1]])
+            self.packet_id = bytes([msg[2], msg[3]])
+            self.length = bytes([msg[4]])
+            self.data = msg[5:5 + self.length[0]]
+            self.crc = bytes([msg[-2], msg[-1]])
         except Exception as e:
             logging.warning("Message deserializing error: %s", msg, e)
         return self
 
     def serialize(self):
-        crc = binascii.unhexlify(hex(self.crc_calculate())[2:])
-        packet_id = binascii.unhexlify(hex(self.packet_id)[2:])
-        msg = '{source:c}{dest:c}{id}{len:c}{data}{crc}{eom}'.format(source=self.source,
-                                                                     dest=self.dest,
-                                                                     id=chr(packet_id[0]) + chr(packet_id[1]),
-                                                                     len=self.length,
-                                                                     data=self.data.decode(),
-                                                                     crc=chr(crc[0]) + chr(crc[1]),
-                                                                     eom=chr(self.EOM))
-        return bytearray(msg, 'raw_unicode_escape')
+        return self.source + self.dest + self.packet_id + self.length + self.data + self.crc + self.EOM
 
 
 class MM485(threading.Thread):
@@ -114,7 +109,7 @@ class MM485(threading.Thread):
     def __init__(self, node_id, port):
         super(MM485, self).__init__()
         self.state = None
-        self._node_id = node_id
+        self._node_id = bytes([node_id])
         self.lock = threading._RLock()
         self._port = port
         self._port.timeout = 0.1
