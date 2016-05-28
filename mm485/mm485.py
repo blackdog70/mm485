@@ -12,7 +12,7 @@ from PyCRC.CRC16 import CRC16
 MAX_RETRY = 3
 MAX_WAIT = 0.2
 RAND_WAIT = 10
-ACK = b'\3'
+ACK = b'\xfd'
 PACKET_SEND = 1
 PACKET_READY = 2
 PACKET_TIMEOUT = 2
@@ -63,7 +63,7 @@ class Packet(object):
         if source is not None and dest is not None and data is not None:
             self.source = source
             self.dest = dest
-            self.data = data
+            self.data = bytearray(data, "utf-8")
             self.length = len(data) if length is None else length
             self.packet_id = self.id_calculate() if packet_id is None else packet_id
             self.crc = self.crc_calculate() if crc is None else crc
@@ -105,7 +105,7 @@ class Packet(object):
                                                                      data=self.data.decode(),
                                                                      crc=chr(crc[0]) + chr(crc[1]),
                                                                      eom=chr(self.EOM))
-        return bytearray(msg, 'unicode_escape')
+        return bytearray(msg, 'raw_unicode_escape')
 
 
 class MM485(threading.Thread):
@@ -133,7 +133,7 @@ class MM485(threading.Thread):
 
     def parse_packet(self, packet):
         self.logger.info('Querying for %s', packet.data)
-        return 'ACK'
+        return ACK
 
     def parse_ack(self, packet):
         pass
