@@ -3,6 +3,7 @@ import time
 import threading
 import logging
 import logging.config
+import binascii
 
 # import serial
 # from serial.threaded import Packetizer, ReaderThread
@@ -58,7 +59,7 @@ class Packet(object):
 
     def __init__(self, source=None, dest=None, data=None, packet_id=None, length=None, crc=None):
         self.retry = 0
-        self.timeout = 0;
+        self.timeout = 0
         if source is not None and dest is not None and data is not None:
             self.source = source
             self.dest = dest
@@ -95,16 +96,16 @@ class Packet(object):
         return self
 
     def serialize(self):
-        crc = hex(self.crc_calculate())[2:].rjust(4, '0')
-        packet_id = hex(self.packet_id)[2:].rjust(4, '0')
-        msg = '{source:c}{dest:c}{id:0>2}{len:c}{data}{crc:0>2}{eom}'.format(source=self.source,
-                                                                         dest=self.dest,
-                                                                         id=packet_id[:2].decode('hex') + packet_id[2:].decode('hex'),
-                                                                         len=self.length,
-                                                                         data=self.data,
-                                                                         crc=crc[:2].decode('hex') + crc[2:].decode('hex'),
-                                                                         eom=chr(self.EOM))
-        return bytearray(msg)
+        crc = binascii.unhexlify(hex(self.crc_calculate())[2:])
+        packet_id = binascii.unhexlify(hex(self.packet_id)[2:])
+        msg = '{source:c}{dest:c}{id}{len:c}{data}{crc}{eom}'.format(source=self.source,
+                                                                     dest=self.dest,
+                                                                     id=chr(packet_id[0]) + chr(packet_id[1]),
+                                                                     len=self.length,
+                                                                     data=self.data.decode(),
+                                                                     crc=chr(crc[0]) + chr(crc[1]),
+                                                                     eom=chr(self.EOM))
+        return bytearray(msg, 'unicode_escape')
 
 
 class MM485(threading.Thread):
@@ -163,16 +164,17 @@ class MM485(threading.Thread):
             if self.queue_out:
                 self.logger.debug("Parse queue out: %s", [str(q) for q in self.queue_out])
             for pkt in self.queue_out:
-                if self.bus_ready() and time.time() - pkt.timeout > PACKET_TIMEOUT:
-                    self.write(pkt)
-                    pkt.timeout = time.time()
-                else:
-                    self.logger.info("Bus is busy")
-                    pkt.retry += 1  # TODO: Test retry
+                if time.time() - pkt.timeout > PACKET_TIMEOUT:
+                    if self.bus_ready():
+                        self.write(pkt)
+                        pkt.timeout = time.time()
+                    else:
+                        self.logger.info("Bus is busy")
+                        pkt.retry += 1  # TODO: Test retry
 
     def write(self, pkt):
         msg = pkt.serialize()
-        self.logger.info("Send %s [%s]", pkt.data, pkt.retry)
+        self.logger.info("Send %s [%s]", msg, pkt.retry)
         self._port.write(msg)
 
     def handle_packet(self, packet):
