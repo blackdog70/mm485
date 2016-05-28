@@ -47,7 +47,7 @@ class NullPort(object):
 #         return 0
 
 class Packet(object):
-    EOM = chr(255)  # End Of Message
+    EOM = 0xff  # End Of Message
 
     source = ''
     dest = ''
@@ -103,7 +103,7 @@ class Packet(object):
                                                                          len=self.length,
                                                                          data=self.data,
                                                                          crc=crc[:2].decode('hex') + crc[2:].decode('hex'),
-                                                                         eom=self.EOM)
+                                                                         eom=chr(self.EOM))
         return bytearray(msg)
 
 
