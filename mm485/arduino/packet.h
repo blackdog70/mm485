@@ -9,35 +9,33 @@
 #define PACKET_H_
 
 #include "Arduino.h"
-#include "crc/Crc.h"
-
-typedef unsigned char uchar;
+#include "Crc.h"
 
 #define MAX_DATA_SIZE 20
 #define MAX_PACKET_SIZE 8+MAX_DATA_SIZE+1 // Take care do not exceed 255 chars
-#define EOM (unsigned char)0xff
-#define PACKET_TIMEOUT 100 // millis
+#define EOM (uint8_t)0xff
+#define PACKET_TIMEOUT 1000 // millis
 
 class Packet {
 public:
-	uchar source;
-	uchar dest;
+	uint8_t source;
+	uint8_t dest;
     unsigned short packet_id;
-    uchar length;
+    size_t length;
     char data[MAX_DATA_SIZE];
     unsigned short crc;
-    uchar retry;
+    uint8_t retry;
     unsigned long timeout;
 
     Packet();
-    Packet(uchar source, uchar dest, const char* data);
-    Packet(uchar source, uchar dest, const char* data, unsigned short packet_id);
+    Packet(uint8_t source, uint8_t dest, const char* data, size_t size);
+    Packet(uint8_t source, uint8_t dest, unsigned short packet_id, const char* data, size_t size);
 	virtual ~Packet() {};
 	bool validate();
-	Packet* deserialize(const char*);
-	char* serialize(char* msg);
+	Packet* deserialize(const char* data);
+	size_t serialize(char* data);
 
-private:
+//private:
 	short id_calculate();
 	unsigned long crc_calculate();
 };

@@ -30,9 +30,9 @@ bool MM485::find_pkt(Packet* queue[], Packet *pkt) {
 	return false;
 }
 
-char* MM485::parse_packet(char *data, Packet* pkt) {
-	strcpy(data, "ACK");
-	return data;
+size_t MM485::parse_packet(char *data, Packet* pkt) {
+	data[0] = ACK;
+	return 1;
 }
 
 void MM485::parse_queue_in() {
@@ -59,13 +59,20 @@ void MM485::parse_queue_in() {
 				queue_out[idx_ack] = NULL;
 			} else {
 				char data[MAX_DATA_SIZE];
-				Packet p(node_id, queue_in[i]->source, parse_packet(data, queue_in[i]), queue_in[i]->packet_id);
-
-//				Serial.println("Send i ");
-//				Serial.println(p.crc);
-//				Serial.println(p.packet_id);
 				char msg[MAX_PACKET_SIZE];
-				Serial.print(p.serialize(msg));
+
+				size_t size = parse_packet(data, queue_in[i]);
+				Packet p(node_id, queue_in[i]->source, queue_in[i]->packet_id, data, size);
+
+				size = p.serialize(msg);
+				Serial.write(msg, size);
+
+//				Serial.print(" === ");
+//				Serial.print("Send ");
+//				Serial.print(p.crc);
+//				Serial.print(p.packet_id);
+//				Serial.print(size);
+//				Serial.print(" === ");
 			}
 			delete queue_in[i];
 			queue_in[i] = NULL;
@@ -74,13 +81,16 @@ void MM485::parse_queue_in() {
 
 void MM485::parse_queue_out() {
 	for(int i = 0; i < SIZE_QUEUE; i++)
-		if (queue_out[i] != NULL) {
-			if (bus_ready() && (millis() - queue_out[i]->timeout) > PACKET_TIMEOUT) {
-//				Serial.print("Send o ");
-
+		if (queue_out[i] != NULL && ((millis() - queue_out[i]->timeout) > PACKET_TIMEOUT)) {
+			if (bus_ready()) {
 				char msg[MAX_PACKET_SIZE];
-				Serial.print(queue_out[i]->serialize(msg));
+
+				size_t size = queue_out[i]->serialize(msg);
+				Serial.write(msg, size);
 				queue_out[i]->timeout = millis();
+
+//				Serial.print("Send o ");
+//				Serial.println(size);
 			} else
 				queue_out[i]->retry++;
 		}
@@ -108,14 +118,20 @@ void MM485::handle_packet() {
 
 	pkt->deserialize((const char*)buffer);
 
-//	Serial.println("Pkt rcvd");
-//	Serial.println(pkt->source);
-//	Serial.println(pkt->dest);
-//	Serial.println(pkt->length);
-//	Serial.println(pkt->data);
-//	Serial.println(pkt->crc_calculate());
-//	Serial.println(pkt->validate());
-//	Serial.println(pkt->dest == node_id);
+//	Serial.print("Pkt rcvd:");
+//	Serial.print(pkt->source);
+//	Serial.print(" - ");
+//	Serial.print(pkt->dest);
+//	Serial.print(" - ");
+//	Serial.print(pkt->length);
+//	Serial.print(" - ");
+//	Serial.print(pkt->data);
+//	Serial.print(" - ");
+//	Serial.print(pkt->crc_calculate());
+//	Serial.print(" - ");
+//	Serial.print(pkt->validate());
+//	Serial.print(" - ");
+//	Serial.print(pkt->dest == node_id);
 
 	if (idx_queue_in < SIZE_QUEUE and pkt->validate() and pkt->dest == node_id) {
 //		Serial.println("Pkt ok");
@@ -151,9 +167,9 @@ void MM485::run() {
 	parse_queue_out();
 }
 
-void MM485::send(uchar to, const char* data) {
-    if (strlen(data) < 255) { //TODO: calcolare la max lunghezza corretta per data
-		Packet *pkt = new Packet(node_id, to, data);
+void MM485::send(uint8_t node_dest, const char* data, size_t size) {
+    if (size <= MAX_DATA_SIZE) {
+		Packet *pkt = new Packet(node_id, node_dest, data, size);
 		if (!find_pkt(queue_out, pkt))
 			queue_add(queue_out, pkt);
     }
