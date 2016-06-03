@@ -12,7 +12,6 @@ from PyCRC.CRC16 import CRC16
 MAX_RETRY = 3
 MAX_WAIT = 0.2
 RAND_WAIT = 10
-ACK = b'\xfd'
 PACKET_SEND = 1
 PACKET_READY = 2
 PACKET_TIMEOUT = 2
@@ -47,8 +46,52 @@ class NullPort(object):
 #     def calculate(self, data):
 #         return 0
 
+
+def enc128(data):
+    v = []
+    n = 0
+    msb = 0
+    for c in data:
+        m = c << n
+        lsb = (m | msb) & 127
+        msb = (m << 1) >> 8
+#        print 'm  ',binary(m, 16)
+#        print 'b  ',binary(msb, 8) + binary(lsb, 8), n, chr(c)
+        v.append(lsb)
+        if n < 7:
+            n += 1
+        else:
+            v.append(msb)
+            msb = 0
+            n = 1
+    if msb:
+        v.append(msb)
+    return v
+
+
+def dec128(data):
+    v = []
+    n = 1
+    r = 0
+    lsb = data[0]
+#    print 'l  ', binary(lsb, 16)
+    for c in data[1:]:
+        m = c << 8
+        msb = ((m >> n) | lsb) & 255
+        lsb = m >> (8 + n)
+#        print 'm  ',binary(m, 16)
+#        print 'c  ',binary(msb, 8) + binary(lsb, 8), n
+        if n != 0:
+            v.append(msb)
+        n = n + 1 if n < 7 else 0
+    if lsb:
+        v.append(lsb)
+    return v
+
+
 class Packet(object):
     EOM = b'\xff'  # End Of Message
+    ACK = b'\xfd'
 
     source = ''
     dest = ''
@@ -58,11 +101,17 @@ class Packet(object):
     crc = ''
 
     def __init__(self, source=None, dest=None, data=None, packet_id=None, length=None, crc=None):
+        extra = {'node': source}
+        logger = logging.getLogger(__name__)
+        self.logger = logging.LoggerAdapter(logger, extra)
         self.retry = 0
         self.timeout = 0
         if source is not None and dest is not None and data is not None:
             self.source = source
-            self.dest = bytes([dest])
+            if type(dest) is bytes:
+                self.dest = dest
+            else:
+                self.dest = bytes([dest])
             if type(data) is str:
                 self.data = bytearray(data, "utf-8")
             else:
@@ -81,8 +130,13 @@ class Packet(object):
         return self.crc_calculate()
 
     def crc_calculate(self):
-        crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
-        return bytearray(binascii.unhexlify(hex(crc)[2:]))
+        crc = 0
+        try:
+            crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
+            crc = bytearray(binascii.unhexlify(hex(crc)[2:].rjust(4, '0')))
+        except Exception as e:
+            self.logger.error("CRC error: %s", e)
+        return crc
 
     def validate(self):
         return self.crc == self.crc_calculate()
@@ -92,15 +146,18 @@ class Packet(object):
             self.source = bytes([msg[0]])
             self.dest = bytes([msg[1]])
             self.packet_id = bytes([msg[2], msg[3]])
-            self.length = bytes([msg[4]])
-            self.data = msg[5:5 + self.length[0]]
+            # self.length = bytes([msg[4]])
+            # self.data = msg[5:5 + self.length[0]]
+            self.data = bytes(dec128(msg[5:5 + msg[4]]))
+            self.length = bytes([len(self.data)])
             self.crc = bytes([msg[-2], msg[-1]])
         except Exception as e:
-            logging.warning("Message deserializing error: %s", msg, e)
+            self.logger.error("Error deserialization of %s : %s", msg, e)
         return self
 
     def serialize(self):
-        return self.source + self.dest + self.packet_id + self.length + self.data + self.crc + self.EOM
+        data = bytes(enc128(self.data))
+        return self.source + self.dest + self.packet_id + bytes([len(data)]) + data + self.crc + self.EOM
 
 
 class MM485(threading.Thread):
@@ -124,11 +181,11 @@ class MM485(threading.Thread):
         extra = {'node': node_id}
         logger = logging.getLogger(__name__)
         self.logger = logging.LoggerAdapter(logger, extra)
-        self.extra = {'node': node_id}
+        # self.extra = {'node': node_id}
 
     def parse_packet(self, packet):
         self.logger.info('Querying for %s', packet.data)
-        return ACK
+        return Packet.ACK
 
     def parse_ack(self, packet):
         pass
@@ -177,7 +234,7 @@ class MM485(threading.Thread):
         pkt = Packet().deserialize(packet)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN and pkt.validate() and pkt.dest == self._node_id:
             if pkt not in self.queue_in:
-                self.logger.info('Add %s to input queue', pkt.data)
+                self.logger.info('Add %s to input queue', packet)
                 with self.lock:
                     self.queue_in.append(pkt)
             else:
@@ -203,7 +260,7 @@ class MM485(threading.Thread):
                 self.parse_queue_out()
                 time.sleep(0.01)
             except Exception as e:
-                self.logger.warning("Error: %s", e)
+                self.logger.warning("Running error: %s", e)
         pass
 
     def join(self, timeout=None):
@@ -211,11 +268,11 @@ class MM485(threading.Thread):
             self._stop.set()
             super(MM485, self).join(timeout)
 
-    def send(self, to, data, msg_id=None):
+    def send(self, dest_node_id, data, msg_id=None):
         if len(data) < 255:
             if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
                 with self.lock:
-                    packet = Packet(self._node_id, to, data, msg_id)
+                    packet = Packet(self._node_id, dest_node_id, data, msg_id)
                     if packet not in self.queue_out:
                         self.queue_out.append(packet)
         else:
@@ -228,3 +285,8 @@ class MM485(threading.Thread):
         while self._port.in_waiting != 0 and time.time() - start < MAX_WAIT:
             time.sleep(0.01)
         return self._port.in_waiting == 0
+
+if __name__ == "__main__":
+#     msg = bytearray([10,1])
+     print([hex(i) for i in enc128(b'\xfd')])
+
