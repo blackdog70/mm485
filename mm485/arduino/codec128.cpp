@@ -20,8 +20,10 @@ int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
             n = 1;
         }
     }
-    if (msb != 0)
+    if (msb)
         buf[buf_idx++] = msb;
+//    if (msb != 0)
+//        buf[buf_idx++] = msb;
 //    if (((size * 8.0) / 7.0) > buf_idx)  					// We need another char to complete the decoded string
 //    	buf[buf_idx++] = msb;
 
@@ -46,8 +48,10 @@ int dec128(unsigned char* buf, const unsigned char* data, size_t size) {
         else
             n = 0;
     }
-    if (lsb != 0 || !data[size-1])
+    if (lsb)
         buf[buf_idx++] = lsb;
+//    if (lsb != 0 || !data[size-1])
+//        buf[buf_idx++] = lsb;
 //    if (data[size-1] == 0) TODO: TO remove after test
 //    	buf[buf_idx++] = 0;  TODO: TO remove after test
     return buf_idx;

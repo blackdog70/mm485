@@ -109,8 +109,8 @@ void MM485::write(Packet* pkt) {
 //	}
 //	Serial.println();
 
+	msg[size++] = EOP;					// Add EOP to have multiple 0s recognizable at the end of the stream
 	enc[0] = enc128((unsigned char*)(enc+1), msg, size);
-//	enc[enc[0] + 1] = EOP;
 	enc[enc[0] + 1] = EOM;
 //	msg[size++] = EOM;
 

@@ -21,7 +21,7 @@ MAX_DATA_SIZE = 50
 MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE + 1
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
 
 
 class NullPort(object):
@@ -251,12 +251,12 @@ class MM485(threading.Thread):
     @staticmethod
     def decode_packet(data):
         # return bytes(dec128(data))[:-1]
-        return bytes(dec128(data))
+        return bytes(dec128(data)[:-1])
 
     @staticmethod
     def encode_packet(data):
         # encoded = bytes(enc128(data + Packet.EOP))
-        encoded = bytes(enc128(data))
+        encoded = bytes(enc128(data + Packet.EOP))
         return bytes([len(encoded)]) + encoded + Packet.EOM
 
     def handle_data_stream(self, packet):

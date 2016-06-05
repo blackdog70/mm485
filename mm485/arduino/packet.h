@@ -13,7 +13,7 @@
 
 #define MAX_DATA_SIZE 50
 #define MAX_PACKET_SIZE 8+MAX_DATA_SIZE+1 // Take care do not exceed 254 chars 255=0xff if for EOM
-#define EOP (uint8_t)0xfc
+#define EOP (uint8_t)0xff
 #define ACK (uint8_t)0xfd
 #define ERR (uint8_t)0xfe
 #define EOM (uint8_t)0xff
