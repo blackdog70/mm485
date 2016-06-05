@@ -8,7 +8,7 @@
 #include "packet.h"
 #include "string.h"
 #include "stdio.h"
-#include "codec128.h"
+//#include "codec128.h"
 
 Packet::Packet() {
 	source = 0;
@@ -21,7 +21,7 @@ Packet::Packet() {
 	timeout = 0;
 }
 
-Packet::Packet(uint8_t src, uint8_t dst, const char* d, size_t size) {
+Packet::Packet(uint8_t src, uint8_t dst, const unsigned char* d, size_t size) {
 	source = src;
 	dest = dst;
 	length = size;
@@ -30,7 +30,7 @@ Packet::Packet(uint8_t src, uint8_t dst, const char* d, size_t size) {
 	crc = crc_calculate();
 }
 
-Packet::Packet(uint8_t src, uint8_t dst, unsigned short id, const char* d, size_t size) {
+Packet::Packet(uint8_t src, uint8_t dst, unsigned short id, const unsigned char* d, size_t size) {
 	source = src;
 	dest = dst;
 	length = size;
@@ -69,30 +69,31 @@ bool Packet::validate() {
 	return crc == crc_calculate();
 }
 
-Packet* Packet::deserialize(const char* msg) {
+Packet* Packet::deserialize(const unsigned char* msg) {
 	source = msg[0];
 	dest = msg[1];
 	packet_id = ((unsigned char)msg[2] << 8) | (unsigned char)msg[3];
-//	length = msg[4];
-//	memcpy(data, (char *)(msg+5), length);
-	char l = msg[4];
-	length = dec128(data, (char*)(msg + 5), l);
+	length = msg[4];
+	memcpy(data, (char *)(msg+5), length);
+//	char l = msg[4];
+//	length = dec128(data, (unsigned char*)(msg + 5), l);
 //	data[(int)length] = 0;
-	crc = ((unsigned char)msg[5+l] << 8) | (unsigned char)msg[6+l];
+	crc = ((unsigned char)msg[5+length] << 8) | (unsigned char)msg[6+length];
 	return this;
 }
 
-size_t Packet::serialize(char *msg) {
+size_t Packet::serialize(unsigned char *msg) {
 	msg[0] = source;
 	msg[1] = dest;
 	msg[2] = (unsigned char)(packet_id >> 8);
 	msg[3] = (unsigned char)(packet_id & 0xFFu);
-//	msg[4] = length;
-//	memcpy((char *)(msg+5), data, length);
-	char l = enc128((char*)(msg + 5), data, length);
-	msg[4] = l;
-	msg[5+l] = (unsigned char)(crc >> 8);
-	msg[6+l] = (unsigned char)(crc & 0xFFu);
-	msg[7+l] = EOM;
-	return 8+l;
+	msg[4] = length;
+	memcpy((char *)(msg+5), data, length);
+//	char l = enc128((unsigned char*)(msg + 5), data, length);
+//	msg[4] = l;
+	msg[5+length] = (unsigned char)(crc >> 8);
+	msg[6+length] = (unsigned char)(crc & 0xFFu);
+//	msg[7+length] = EOM;
+//	return 8+length;
+	return 7+length;
 }

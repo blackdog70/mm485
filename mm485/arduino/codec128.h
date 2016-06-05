@@ -8,8 +8,10 @@
 #ifndef MM485_ARDUINO_CODEC128_H_
 #define MM485_ARDUINO_CODEC128_H_
 
-int enc128(char* buf, const char* data, char size);
-int dec128(char* buf, const char* data, char size);
+#include "Arduino.h"
+
+int enc128(unsigned char* buf, const unsigned char* data, size_t size);
+int dec128(unsigned char* buf, const unsigned char* data, size_t size);
 
 
 #endif /* MM485_ARDUINO_CODEC128_H_ */

@@ -7,8 +7,9 @@
 
 #include "Arduino.h"
 #include "mm485.h"
+#include "codec128.h"
 
-MM485::MM485(char node_id) {
+MM485::MM485(unsigned char node_id) {
 	// TODO Auto-generated constructor stub
 	MM485::node_id = node_id;
 	*buffer = 0;
@@ -30,7 +31,7 @@ bool MM485::find_pkt(Packet* queue[], Packet *pkt) {
 	return false;
 }
 
-size_t MM485::parse_packet(char *data, Packet* pkt) {
+size_t MM485::parse_packet(unsigned char *data, Packet* pkt) {
 	data[0] = ACK;
 	return 1;
 }
@@ -58,15 +59,13 @@ void MM485::parse_queue_in() {
 				delete queue_out[idx_ack];
 				queue_out[idx_ack] = NULL;
 			} else {
-				char data[MAX_DATA_SIZE];
-				char msg[MAX_PACKET_SIZE];
+				unsigned char data[MAX_DATA_SIZE];
+				unsigned char msg[MAX_PACKET_SIZE];
 
 				size_t size = parse_packet(data, queue_in[i]);
-				Packet p(node_id, queue_in[i]->source, queue_in[i]->packet_id, data, size);
+				Packet pkt(node_id, queue_in[i]->source, queue_in[i]->packet_id, data, size);
 
-				size = p.serialize(msg);
-				Serial.write(msg, size);
-
+				write(&pkt);
 //				Serial.print(" === ");
 //				Serial.print("Send ");
 //				Serial.print(p.crc);
@@ -83,10 +82,7 @@ void MM485::parse_queue_out() {
 	for(int i = 0; i < SIZE_QUEUE; i++)
 		if (queue_out[i] != NULL && ((millis() - queue_out[i]->timeout) > PACKET_TIMEOUT)) {
 			if (bus_ready()) {
-				char msg[MAX_PACKET_SIZE];
-
-				size_t size = queue_out[i]->serialize(msg);
-				Serial.write(msg, size);
+				write(queue_out[i]);
 				queue_out[i]->timeout = millis();
 
 //				Serial.print("Send o ");
@@ -94,6 +90,37 @@ void MM485::parse_queue_out() {
 			} else
 				queue_out[i]->retry++;
 		}
+}
+
+void MM485::write(Packet* pkt) {
+	unsigned char msg[MAX_PACKET_SIZE];
+	unsigned char enc[MAX_PACKET_SIZE];
+
+	size_t size = pkt->serialize(msg);
+
+//	Serial.println("-----------");
+//	sprintf((char*)enc, "Size msg = %u", size);
+//	Serial.println((char *)enc);
+//	for(unsigned int i = 0; i< size; i++) {
+//		sprintf((char*)enc, "\\x%02x", msg[i]);
+//		Serial.print((char*)enc);
+//	}
+//	Serial.println();
+//
+	enc[0] = enc128((unsigned char*)(enc+1), msg, size);
+	enc[enc[0] + 1] = EOM;
+//	msg[size++] = EOM;
+//
+//	sprintf((char*)msg, "Size enc = %u", enc[0]);
+//	Serial.println((char *)msg);
+//	for(unsigned int i = 0; i<= size + 3; i++) {
+//		sprintf((char*)msg, "\\x%02x", enc[i]);
+//		Serial.print((char*)msg);
+//	}
+//	Serial.println();
+
+//	Serial.write(msg, size);
+	Serial.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
 }
 
 void MM485::queue_add(Packet* queue[], Packet* pkt) {
@@ -113,10 +140,17 @@ void MM485::queue_add(Packet* queue[], Packet* pkt) {
 //	}
 }
 
-void MM485::handle_packet() {
+void MM485::handle_data_stream() {
+	unsigned char stream[chr_in - buffer - 1]; // -1 is for EOM char
+
+	if (buffer[0] != sizeof(stream))
+		return;
+
+	dec128(stream, (unsigned char*)(buffer+1), sizeof(stream));
+
 	Packet *pkt = new Packet();
 
-	pkt->deserialize((const char*)buffer);
+	pkt->deserialize((const unsigned char*)stream);
 
 //	Serial.print("Pkt rcvd:");
 //	Serial.print(pkt->source);
@@ -125,7 +159,6 @@ void MM485::handle_packet() {
 //	Serial.print(" - ");
 //	Serial.print(pkt->length);
 //	Serial.print(" - ");
-//	Serial.print(pkt->data);
 //	Serial.print(" - ");
 //	Serial.print(pkt->crc_calculate());
 //	Serial.print(" - ");
@@ -151,10 +184,10 @@ void MM485::read() {
 //		sprintf(m, "%x - %c", *chr_in, *chr_in);
 //		Serial.println(m);
 
-		if (*chr_in == EOM) {
-			handle_packet();
+		if (*chr_in == EOM && chr_in > buffer) {
+			handle_data_stream();
 			buffer[0] = 0;		// Clear buffer
-			chr_in = buffer;	// Reposition of pointer chr_in
+			chr_in = buffer;	// Repositioning of pointer chr_in
 		} else {
 			chr_in++;
 		}
@@ -167,7 +200,7 @@ void MM485::run() {
 	parse_queue_out();
 }
 
-void MM485::send(uint8_t node_dest, const char* data, size_t size) {
+void MM485::send(uint8_t node_dest, const unsigned char* data, size_t size) {
     if (size <= MAX_DATA_SIZE) {
 		Packet *pkt = new Packet(node_id, node_dest, data, size);
 		if (!find_pkt(queue_out, pkt))

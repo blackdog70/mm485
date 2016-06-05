@@ -20,7 +20,8 @@ MAX_QUEUE_IN_LEN = 2
 MAX_DATA_SIZE = 20
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+
 
 class NullPort(object):
     is_open = True
@@ -84,14 +85,17 @@ def dec128(data):
         if n != 0:
             v.append(msb)
         n = n + 1 if n < 7 else 0
-    if lsb:
+    if lsb or data[-1] == 0:
         v.append(lsb)
+    # if data[-1] == 0: TODO: To remove after test
+    #     v.append(0)   TODO: To remove after test
     return v
 
 
 class Packet(object):
     EOM = b'\xff'  # End Of Message
     ACK = b'\xfd'
+    ERR = b'\xfe'
 
     source = ''
     dest = ''
@@ -146,18 +150,19 @@ class Packet(object):
             self.source = bytes([msg[0]])
             self.dest = bytes([msg[1]])
             self.packet_id = bytes([msg[2], msg[3]])
-            # self.length = bytes([msg[4]])
-            # self.data = msg[5:5 + self.length[0]]
-            self.data = bytes(dec128(msg[5:5 + msg[4]]))
-            self.length = bytes([len(self.data)])
+            self.length = bytes([msg[4]])
+            self.data = msg[5:5 + self.length[0]]
+            # self.data = bytes(dec128(msg[5:5 + msg[4]]))
+            # self.length = bytes([len(self.data)])
             self.crc = bytes([msg[-2], msg[-1]])
         except Exception as e:
             self.logger.error("Error deserialization of %s : %s", msg, e)
         return self
 
     def serialize(self):
-        data = bytes(enc128(self.data))
-        return self.source + self.dest + self.packet_id + bytes([len(data)]) + data + self.crc + self.EOM
+        # data = bytes(enc128(self.data))
+        # return self.source + self.dest + self.packet_id + bytes([len(data)]) + data + self.crc + self.EOM
+        return self.source + self.dest + self.packet_id + self.length + self.data + self.crc
 
 
 class MM485(threading.Thread):
@@ -167,7 +172,7 @@ class MM485(threading.Thread):
         super(MM485, self).__init__()
         self.state = None
         self._node_id = bytes([node_id])
-        self.lock = threading._RLock()
+        self.lock = threading._RLock()  # FIXME: Change to non protected RLock
         self._port = port
         self._port.timeout = 0.1
         self._msg_id = 0
@@ -185,6 +190,8 @@ class MM485(threading.Thread):
 
     def parse_packet(self, packet):
         self.logger.info('Querying for %s', packet.data)
+        if packet.data == Packet.ERR:
+            pass
         return Packet.ACK
 
     def parse_ack(self, packet):
@@ -202,9 +209,10 @@ class MM485(threading.Thread):
                     self.parse_ack(pkt_in)
                     self.queue_out.remove(pkt_ack[0])
                 else:
+                    data = self.parse_packet(pkt_in)
                     packet = Packet(source=self._node_id,
                                     dest=pkt_in.source,
-                                    data=self.parse_packet(pkt_in),
+                                    data=data,
                                     packet_id=pkt_in.packet_id)
                     self.logger.info('Found %s', packet.data)
                     self.write(packet)
@@ -225,13 +233,28 @@ class MM485(threading.Thread):
                         pkt.retry += 1  # TODO: Test retry
 
     def write(self, pkt):
-        msg = pkt.serialize()
+        msg = self.encode_packet(pkt.serialize())
         self.logger.info("Send %s [%s]", msg, pkt.retry)
+        self.logger.debug("Packet format: %s", pkt)
         self._port.write(msg)
 
-    def handle_packet(self, packet):
-        self.logger.info('Check for packet %s', packet)
-        pkt = Packet().deserialize(packet)
+    @staticmethod
+    def decode_packet(data):
+        return bytes(dec128(data))
+
+    @staticmethod
+    def encode_packet(data):
+        encoded = bytes(enc128(data))
+        return bytes([len(encoded)]) + encoded + Packet.EOM
+
+    def handle_data_stream(self, packet):
+        if packet[0] != len(packet[1:]):
+            self.logger.info("Data stream is invalid")
+            return
+        decoded = self.decode_packet(packet[1:])
+        self.logger.info('Check for packet %s', decoded)
+        pkt = Packet().deserialize(decoded)
+        self.logger.debug('Packet format: %s', pkt)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN and pkt.validate() and pkt.dest == self._node_id:
             if pkt not in self.queue_in:
                 self.logger.info('Add %s to input queue', packet)
@@ -248,8 +271,8 @@ class MM485(threading.Thread):
             self.buffer.extend(data)
             self.logger.info("Received %s", self.buffer)
         while self.TERMINATOR in self.buffer:
-            packet, self.buffer = self.buffer.split(self.TERMINATOR, 1)
-            self.handle_packet(packet)
+            data_stream, self.buffer = self.buffer.split(self.TERMINATOR, 1)
+            self.handle_data_stream(data_stream)
 
     def run(self):
         while not self._stop.isSet():
@@ -288,5 +311,14 @@ class MM485(threading.Thread):
 
 if __name__ == "__main__":
 #     msg = bytearray([10,1])
-     print([hex(i) for i in enc128(b'\xfd')])
+#     print([hex(i) for i in enc128([0x88, 0, 1, 0, 0])])
+#     print([hex(i) for i in dec128([0x8, 0x1, 0x4, 0, 0])])
 
+    a = b'\x02\x01\x02\xc1\x06\x04\x01\x59\x63\x5f\x45\x02\xc1'
+    print([hex(i) for i in a])
+
+    # a = enc128(b'\x02\x01\x08\xe2\x06\x04\x01W<`E\x08\xe2')
+    a = enc128(a)
+    print([hex(i) for i in a])
+
+    print([hex(i) for i in dec128(a)])

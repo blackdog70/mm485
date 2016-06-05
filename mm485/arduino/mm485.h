@@ -14,15 +14,14 @@
 #define MAX_BUFFER_SIZE NUM_PACKET*MAX_PACKET_SIZE
 #define SIZE_QUEUE 3
 #define MAX_WAIT 10 // time in milliseconds
-#define ACK 0xfd
 
 class MM485 {
 public:
 	uint8_t node_id;
 
-	MM485(char node_id);
+	MM485(unsigned char node_id);
 	virtual ~MM485();
-	void send(uint8_t to, const char* data, size_t size);
+	void send(uint8_t to, const unsigned char* data, size_t size);
 	virtual void run();
 
 private:
@@ -33,7 +32,7 @@ private:
 	int idx_queue_in;
 	int idx_queue_out;
 
-	void handle_packet();
+	void handle_data_stream();
 	void parse_queue_in();
 	void parse_queue_out();
 	void queue_add(Packet* queue[], Packet* pkt);
@@ -46,8 +45,9 @@ protected:
 	 * fill data with a response for Packet
 	 * return size of data
 	 */
-	virtual size_t parse_packet(char *data, Packet*);
+	virtual size_t parse_packet(unsigned char *data, Packet*);
 	virtual void parse_ack(Packet*) {};
+	void write(Packet* pkt);
 };
 
 #endif /* MM485_H_ */
