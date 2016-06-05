@@ -17,10 +17,11 @@ PACKET_READY = 2
 PACKET_TIMEOUT = 2
 MAX_QUEUE_OUT_LEN = 3
 MAX_QUEUE_IN_LEN = 2
-MAX_DATA_SIZE = 20
+MAX_DATA_SIZE = 50
+MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE + 1
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 
 class NullPort(object):
@@ -53,9 +54,11 @@ def enc128(data):
     n = 0
     msb = 0
     for c in data:
-        m = c << n
-        lsb = (m | msb) & 127
-        msb = (m << 1) >> 8
+        # m = c << n
+        # lsb = (m | msb) & 127
+        # msb = (m << 1) >> 8
+        lsb = ((c << n) | msb) & 127
+        msb = c >> (7 - n)
 #        print 'm  ',binary(m, 16)
 #        print 'b  ',binary(msb, 8) + binary(lsb, 8), n, chr(c)
         v.append(lsb)
@@ -67,6 +70,8 @@ def enc128(data):
             n = 1
     if msb:
         v.append(msb)
+    # if ((len(data) * 8) / 7) > len(v) and v[-1]:
+    #     v.append(msb)
     return v
 
 
@@ -77,15 +82,19 @@ def dec128(data):
     lsb = data[0]
 #    print 'l  ', binary(lsb, 16)
     for c in data[1:]:
-        m = c << 8
-        msb = ((m >> n) | lsb) & 255
-        lsb = m >> (8 + n)
+        # m = c << 8
+        # msb = ((m >> n) | lsb) & 255
+        # lsb = m >> (8 + n)
+        msb = ((c << (8 - n)) | lsb) & 255
+        lsb = c >> n
 #        print 'm  ',binary(m, 16)
 #        print 'c  ',binary(msb, 8) + binary(lsb, 8), n
         if n != 0:
             v.append(msb)
         n = n + 1 if n < 7 else 0
-    if lsb or data[-1] == 0:
+    # if (((len(data) * 7) / 8) > len(v)) and v[-1]:
+    #     v.append(lsb)
+    if lsb:
         v.append(lsb)
     # if data[-1] == 0: TODO: To remove after test
     #     v.append(0)   TODO: To remove after test
@@ -93,9 +102,10 @@ def dec128(data):
 
 
 class Packet(object):
-    EOM = b'\xff'  # End Of Message
+    EOP = b'\xfc'  # End of packet
     ACK = b'\xfd'
     ERR = b'\xfe'
+    EOM = b'\xff'  # End Of message
 
     source = ''
     dest = ''
@@ -240,10 +250,12 @@ class MM485(threading.Thread):
 
     @staticmethod
     def decode_packet(data):
+        # return bytes(dec128(data))[:-1]
         return bytes(dec128(data))
 
     @staticmethod
     def encode_packet(data):
+        # encoded = bytes(enc128(data + Packet.EOP))
         encoded = bytes(enc128(data))
         return bytes([len(encoded)]) + encoded + Packet.EOM
 
@@ -292,7 +304,7 @@ class MM485(threading.Thread):
             super(MM485, self).join(timeout)
 
     def send(self, dest_node_id, data, msg_id=None):
-        if len(data) < 255:
+        if len(data) < MAX_PACKET_SIZE:
             if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
                 with self.lock:
                     packet = Packet(self._node_id, dest_node_id, data, msg_id)
@@ -310,15 +322,39 @@ class MM485(threading.Thread):
         return self._port.in_waiting == 0
 
 if __name__ == "__main__":
-#     msg = bytearray([10,1])
-#     print([hex(i) for i in enc128([0x88, 0, 1, 0, 0])])
-#     print([hex(i) for i in dec128([0x8, 0x1, 0x4, 0, 0])])
+    # a = enc128([ord(i) for i in '0123456789012345678'])
+    # a = enc128([1, 0, 1, 0, 1, 0, 1])
+    # print ((len(a) * 7) / 8)
+    # print ([hex(i) for i in a])
+    # b = dec128(a)
+    # print (len(b))
+    # print ([chr(i) for i in b])
 
-    a = b'\x02\x01\x02\xc1\x06\x04\x01\x59\x63\x5f\x45\x02\xc1'
+    # print([hex(i) for i in enc128([0x88, 0, 1, 0, 0])])
+    # print([hex(i) for i in dec128([0x8, 0x1, 0x4, 0, 0])])
+
+    # a = b'\x02\x01\x02\xc1\x06\x04\x01\x59\x63\x5f\x45\x02\xc1'
+    # print([hex(i) for i in a])
+
+    z = bytes([2, 1]) +  b'\x9d'+ b'\x1c' + b'\x05' + bytes([ord(i) for i in 'Alive'])
+    print (len(z))
+    a = enc128(z)
+    # a = enc128(a)
     print([hex(i) for i in a])
-
-    # a = enc128(b'\x02\x01\x08\xe2\x06\x04\x01W<`E\x08\xe2')
-    a = enc128(a)
-    print([hex(i) for i in a])
-
+    #
     print([hex(i) for i in dec128(a)])
+
+    # a = Packet().deserialize(bytearray([2, 1, 40, 0, 6, 4, 0, 43, 105, 86, 68, ord('('), 0]))
+    # a = Packet().deserialize(b'\x02\x01\x98X\x01\xfd\x11\xe0\x00')
+    # print ("CRC=", a.crc)
+    # print ("CRC Calculate =", a.crc_calculate())
+    # e = enc128(a.serialize())
+    # d = dec128(e)
+    #
+    # print("enc", [hex(i) for i in e])
+    # print("dec", [hex(i) for i in d])
+    # print("dec", [i for i in d])
+    #
+    # a.deserialize(d)
+    # print ("CRC=", a.crc)
+    # print ("CRC Calculate =", a.crc_calculate())

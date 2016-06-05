@@ -6,9 +6,11 @@ int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
     char lsb;
     char msb = 0;
     for (unsigned int c = 0; c < size; c++) {
-    	int m = (data[c] & 255) << n;
-        lsb = (m | msb) & 127;
-        msb = (m << 1) >> 8;
+//    	int m = (data[c] & 255) << n;
+//        lsb = (m | msb) & 127;
+//        msb = (m << 1) >> 8;
+        lsb = (((data[c] & 255) << n) | msb) & 127;
+        msb = (data[c] & 255) >> (7 - n);
         buf[buf_idx++] = lsb;
         if (n < 7) {
             n++;
@@ -20,6 +22,9 @@ int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
     }
     if (msb != 0)
         buf[buf_idx++] = msb;
+//    if (((size * 8.0) / 7.0) > buf_idx)  					// We need another char to complete the decoded string
+//    	buf[buf_idx++] = msb;
+
     return buf_idx;
 }
 
@@ -29,9 +34,11 @@ int dec128(unsigned char* buf, const unsigned char* data, size_t size) {
 	char lsb = data[0];
 	char msb;
     for (unsigned int c = 1; c < size; c++) {
-    	int m = (data[c] & 255) << 8;
-        msb = ((m >> n) | lsb) & 255;
-        lsb = (m >> (8 + n));
+//    	int m = (data[c] & 255) << 8;
+//        msb = ((m >> n) | lsb) & 255;
+//        lsb = (m >> (8 + n));
+        msb = (((data[c] & 255) << (8 - n)) | lsb) & 255;
+        lsb = (data[c] & 255) >> n;
         if (n != 0)
             buf[buf_idx++] = msb;
         if (n < 7)

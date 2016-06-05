@@ -6,6 +6,7 @@
  */
 
 #include "Arduino.h"
+#include "FreeMemory.h"
 #include "mm485.h"
 #include "codec128.h"
 
@@ -25,9 +26,11 @@ MM485::~MM485() {
 }
 
 bool MM485::find_pkt(Packet* queue[], Packet *pkt) {
-	for (int i=0; i<idx_queue_in; i++)
+	for (int i=0; i<SIZE_QUEUE; i++)
 		if (pkt->crc == queue[i]->crc)
 			return true;
+
+//	Serial.println("Pkt not fnd");
 	return false;
 }
 
@@ -60,7 +63,7 @@ void MM485::parse_queue_in() {
 				queue_out[idx_ack] = NULL;
 			} else {
 				unsigned char data[MAX_DATA_SIZE];
-				unsigned char msg[MAX_PACKET_SIZE];
+//				unsigned char msg[MAX_PACKET_SIZE];
 
 				size_t size = parse_packet(data, queue_in[i]);
 				Packet pkt(node_id, queue_in[i]->source, queue_in[i]->packet_id, data, size);
@@ -86,7 +89,6 @@ void MM485::parse_queue_out() {
 				queue_out[i]->timeout = millis();
 
 //				Serial.print("Send o ");
-//				Serial.println(size);
 			} else
 				queue_out[i]->retry++;
 		}
@@ -98,7 +100,7 @@ void MM485::write(Packet* pkt) {
 
 	size_t size = pkt->serialize(msg);
 
-//	Serial.println("-----------");
+//	Serial.println("----start-write----");
 //	sprintf((char*)enc, "Size msg = %u", size);
 //	Serial.println((char *)enc);
 //	for(unsigned int i = 0; i< size; i++) {
@@ -106,38 +108,54 @@ void MM485::write(Packet* pkt) {
 //		Serial.print((char*)enc);
 //	}
 //	Serial.println();
-//
+
 	enc[0] = enc128((unsigned char*)(enc+1), msg, size);
+//	enc[enc[0] + 1] = EOP;
 	enc[enc[0] + 1] = EOM;
 //	msg[size++] = EOM;
-//
+
 //	sprintf((char*)msg, "Size enc = %u", enc[0]);
 //	Serial.println((char *)msg);
-//	for(unsigned int i = 0; i<= size + 3; i++) {
+//	for(int i = 0; i< enc[0] + 2; i++) {
 //		sprintf((char*)msg, "\\x%02x", enc[i]);
 //		Serial.print((char*)msg);
 //	}
 //	Serial.println();
+//	Serial.println("----end--write----");
 
 //	Serial.write(msg, size);
 	Serial.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
+//	Serial.flush();
 }
 
 void MM485::queue_add(Packet* queue[], Packet* pkt) {
 	for(unsigned int i = 0; i < SIZE_QUEUE; i++)
 		if (queue[i] == NULL) {
 			queue[i] = pkt;
+
+//			char msg[10];
+//
+//			sprintf((char*)msg, "%i", freeMemory());
+//			Serial.print("Mem=");
+//			Serial.println(msg);
+//
+//			Serial.println("Add pkt");
+//			Serial.print("N =");
+//			Serial.println(i);
+//
+//			unsigned char s[MAX_PACKET_SIZE];
+//			queue[i]->serialize(s);
+//			for(unsigned int j = 0; j< queue[j]->length; j++) {
+//				sprintf((char*)msg, "\\x%02x", s[j]);
+//				Serial.print((char*)msg);
+//			}
+//
+//			sprintf(msg,"CRC = %u", queue[i]->crc);
+//			Serial.println(msg);
+//			Serial.println();
+
 			break;
 		}
-
-//	Serial.println("Add pkt");
-//	for(unsigned int i = 0; i < SIZE_QUEUE; i++) {
-//		if (queue[i] != NULL) {
-//			Serial.print(i);
-//			Serial.print(" - ");
-//			Serial.println(queue[i]->data);
-//		}
-//	}
 }
 
 void MM485::handle_data_stream() {
@@ -166,11 +184,10 @@ void MM485::handle_data_stream() {
 //	Serial.print(" - ");
 //	Serial.print(pkt->dest == node_id);
 
-	if (idx_queue_in < SIZE_QUEUE and pkt->validate() and pkt->dest == node_id) {
+	if (pkt->validate() and pkt->dest == node_id) {
 //		Serial.println("Pkt ok");
 		if (!find_pkt(queue_in, pkt))
 			queue_add(queue_in, pkt);
-//			Serial.println("Pkt not fnd");
 	}
 }
 
@@ -205,6 +222,8 @@ void MM485::send(uint8_t node_dest, const unsigned char* data, size_t size) {
 		Packet *pkt = new Packet(node_id, node_dest, data, size);
 		if (!find_pkt(queue_out, pkt))
 			queue_add(queue_out, pkt);
+		else
+			delete pkt;
     }
 }
 
