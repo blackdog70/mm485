@@ -172,7 +172,7 @@ class MM485(threading.Thread):
         super(MM485, self).__init__()
         self.state = None
         self._node_id = bytes([node_id])
-        self.lock = threading._RLock()  # FIXME: Change to non protected RLock
+        self.lock = threading.RLock()
         self._port = port
         self._port.timeout = 0.1
         self._msg_id = 0
