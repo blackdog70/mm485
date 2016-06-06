@@ -108,12 +108,13 @@ void MM485::write(Packet* pkt) {
 //		Serial.print((char*)enc);
 //	}
 //	Serial.println();
+	sprintf((char*)msg, "%i", freeMemory());
+	Serial.print("Mem=");
+	Serial.println((char*)msg);
 
-	msg[size++] = EOP;					// Add EOP to have multiple 0s recognizable at the end of the stream
 	enc[0] = enc128((unsigned char*)(enc+1), msg, size);
 	enc[enc[0] + 1] = EOM;
-//	msg[size++] = EOM;
-
+//
 //	sprintf((char*)msg, "Size enc = %u", enc[0]);
 //	Serial.println((char *)msg);
 //	for(int i = 0; i< enc[0] + 2; i++) {
@@ -123,9 +124,7 @@ void MM485::write(Packet* pkt) {
 //	Serial.println();
 //	Serial.println("----end--write----");
 
-//	Serial.write(msg, size);
 	Serial.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
-//	Serial.flush();
 }
 
 void MM485::queue_add(Packet* queue[], Packet* pkt) {
@@ -135,27 +134,29 @@ void MM485::queue_add(Packet* queue[], Packet* pkt) {
 
 //			char msg[10];
 //
+//			Serial.println("----start-queue-add----");
 //			sprintf((char*)msg, "%i", freeMemory());
 //			Serial.print("Mem=");
 //			Serial.println(msg);
 //
-//			Serial.println("Add pkt");
+//			Serial.print("Add pkt ");
 //			Serial.print("N =");
 //			Serial.println(i);
 //
 //			unsigned char s[MAX_PACKET_SIZE];
-//			queue[i]->serialize(s);
-//			for(unsigned int j = 0; j< queue[j]->length; j++) {
+//			size_t size = queue[i]->serialize(s);
+//			for(unsigned int j = 0; j< size; j++) {
 //				sprintf((char*)msg, "\\x%02x", s[j]);
 //				Serial.print((char*)msg);
 //			}
-//
+//			Serial.println();
 //			sprintf(msg,"CRC = %u", queue[i]->crc);
 //			Serial.println(msg);
-//			Serial.println();
+//			Serial.println("----end-queue-add----");
 
-			break;
+			return;
 		}
+	delete pkt;
 }
 
 void MM485::handle_data_stream() {
@@ -164,7 +165,7 @@ void MM485::handle_data_stream() {
 	if (buffer[0] != sizeof(stream))
 		return;
 
-	dec128(stream, (unsigned char*)(buffer+1), sizeof(stream));
+	dec128(stream, (unsigned char*)(buffer+1), sizeof(stream)); // TODO: Check if it work
 
 	Packet *pkt = new Packet();
 
@@ -184,11 +185,11 @@ void MM485::handle_data_stream() {
 //	Serial.print(" - ");
 //	Serial.print(pkt->dest == node_id);
 
-	if (pkt->validate() and pkt->dest == node_id) {
+	if (pkt->validate() && pkt->dest == node_id && !find_pkt(queue_in, pkt)) {
 //		Serial.println("Pkt ok");
-		if (!find_pkt(queue_in, pkt))
-			queue_add(queue_in, pkt);
-	}
+		queue_add(queue_in, pkt);
+	} else
+		delete pkt;
 }
 
 void MM485::read() {
