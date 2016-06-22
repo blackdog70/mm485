@@ -3,29 +3,37 @@
 int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
     char n = 0;
     int buf_idx = 0;
-    char lsb;
-    char msb = 0;
+    uint16_t lsb;
+    uint16_t msb = 0;
+
+//	Serial.println("==encode==");
+
     for (unsigned int c = 0; c < size; c++) {
-//    	int m = (data[c] & 255) << n;
-//        lsb = (m | msb) & 127;
-//        msb = (m << 1) >> 8;
-        lsb = (((data[c] & 255) << n) | msb) & 127;
-        msb = (data[c] & 255) >> (7 - n);
+        lsb = (((data[c] & 0xff) << n) | msb) & 0x7f;
+        msb = ((data[c] & 0xff) >> (7 - n)) & 0xff;
         buf[buf_idx++] = lsb;
+
+//		Serial.print(lsb, HEX);
+//		Serial.print(" ");
+
         if (n < 7) {
             n++;
         } else {
-            buf[buf_idx++] = msb;
-            msb = 0;
+            lsb = msb & 0x7f;
+            msb = (msb >> 7) & 0xff;
+            buf[buf_idx++] = lsb;
+
+//    		Serial.print(lsb, HEX);
+//    		Serial.print(" ");
+
             n = 1;
         }
     }
     if (msb)
         buf[buf_idx++] = msb;
-//    if (msb != 0)
-//        buf[buf_idx++] = msb;
-//    if (((size * 8.0) / 7.0) > buf_idx)  					// We need another char to complete the decoded string
-//    	buf[buf_idx++] = msb;
+
+//	Serial.println();
+//	Serial.println("==encode==");
 
     return buf_idx;
 }
@@ -33,14 +41,11 @@ int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
 int dec128(unsigned char* buf, const unsigned char* data, size_t size) {
 	char n = 1;
 	int buf_idx = 0;
-	char lsb = data[0];
-	char msb;
+	uint16_t lsb = data[0];
+	uint16_t msb;
     for (unsigned int c = 1; c < size; c++) {
-//    	int m = (data[c] & 255) << 8;
-//        msb = ((m >> n) | lsb) & 255;
-//        lsb = (m >> (8 + n));
-        msb = (((data[c] & 255) << (8 - n)) | lsb) & 255;
-        lsb = (data[c] & 255) >> n;
+        msb = (((data[c] & 0xff) << (8 - n)) | lsb) & 0xff;
+        lsb = ((data[c] & 0xff) >> n) & 0xff;
         if (n != 0)
             buf[buf_idx++] = msb;
         if (n < 7)
@@ -50,9 +55,5 @@ int dec128(unsigned char* buf, const unsigned char* data, size_t size) {
     }
     if (lsb)
         buf[buf_idx++] = lsb;
-//    if (lsb != 0 || !data[size-1])
-//        buf[buf_idx++] = lsb;
-//    if (data[size-1] == 0) TODO: TO remove after test
-//    	buf[buf_idx++] = 0;  TODO: TO remove after test
     return buf_idx;
 }
