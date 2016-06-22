@@ -6,9 +6,16 @@
  */
 
 #include "Arduino.h"
-#include "FreeMemory.h"
 #include "mm485.h"
 #include "codec128.h"
+#include "FreeMemory.h"
+
+#ifdef SOFTWARESERIAL
+const int rx=3;
+const int tx=4;
+const int en485 = 2;
+SoftwareSerial rs485(rx,tx);
+#endif
 
 MM485::MM485(unsigned char node_id) {
 	// TODO Auto-generated constructor stub
@@ -19,10 +26,6 @@ MM485::MM485(unsigned char node_id) {
 	idx_queue_out = 0;
 	for (int i=0; i<NUM_PACKET; i++)
 		queue_in[i] = queue_out[i] = NULL;
-}
-
-MM485::~MM485() {
-	// TODO Auto-generated destructor stub
 }
 
 bool MM485::find_pkt(Packet* queue[], Packet *pkt) {
@@ -108,9 +111,9 @@ void MM485::write(Packet* pkt) {
 //		Serial.print((char*)enc);
 //	}
 //	Serial.println();
-	sprintf((char*)msg, "%i", freeMemory());
-	Serial.print("Mem=");
-	Serial.println((char*)msg);
+//	sprintf((char*)msg, "%i", freeMemory());
+//	Serial.print("Mem=");
+//	Serial.println((char*)msg);
 
 	enc[0] = enc128((unsigned char*)(enc+1), msg, size);
 	enc[enc[0] + 1] = EOM;
@@ -124,7 +127,14 @@ void MM485::write(Packet* pkt) {
 //	Serial.println();
 //	Serial.println("----end--write----");
 
+#ifdef SOFTWARESERIAL
+	digitalWrite(en485, HIGH);          // Enable write on 485
+	rs485.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
+	rs485.flush();
+	digitalWrite(en485, LOW);			// 485 listening mode
+#else
 	Serial.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
+#endif
 }
 
 void MM485::queue_add(Packet* queue[], Packet* pkt) {
@@ -193,14 +203,21 @@ void MM485::handle_data_stream() {
 }
 
 void MM485::read() {
-//	Serial.print("Len ");
-//	Serial.println(strlen((char*)buffer));
+#ifdef SOFTWARESERIAL
+	while (rs485.available() > 0 && chr_in < buffer + sizeof(buffer)) {
+		*chr_in = (uint8_t)rs485.read();
+#else
 	while (Serial.available() > 0 && chr_in < buffer + sizeof(buffer)) {
-		*chr_in = (unsigned char)Serial.read();
+		*chr_in = (uint8_t)Serial.read();
+#endif
 
 //		char m[10];
 //		sprintf(m, "%x - %c", *chr_in, *chr_in);
-//		Serial.println(m);
+//		Serial.print(m);
+//		Serial.print(" - ");
+//		Serial.print(*chr_in == EOM);
+//		Serial.print(" - ");
+//		Serial.println(chr_in > buffer);
 
 		if (*chr_in == EOM && chr_in > buffer) {
 			handle_data_stream();
@@ -230,6 +247,11 @@ void MM485::send(uint8_t node_dest, const unsigned char* data, size_t size) {
 
 bool MM485::bus_ready() {
 	unsigned long start = millis();
+#ifdef SOFTWARESERIAL
+	while (rs485.available() > 0 && millis() - start < MAX_WAIT);
+	return rs485.available() == 0;
+#else
 	while (Serial.available() > 0 && millis() - start < MAX_WAIT);
 	return Serial.available() == 0;
+#endif
 }

@@ -8,9 +8,21 @@
 #ifndef MM485_H_
 #define MM485_H_
 
-#include "packet.h"
+#define SOFTWARESERIAL
 
-#define NUM_PACKET 3
+#include <packet.h>
+
+#ifdef SOFTWARESERIAL
+#include <SoftwareSerial.h>
+
+extern SoftwareSerial rs485;
+extern const int en485;
+#else
+extern HardwareSerial SSerial;
+#endif
+
+
+#define NUM_PACKET 2
 #define MAX_BUFFER_SIZE NUM_PACKET*MAX_PACKET_SIZE
 #define SIZE_QUEUE 3
 #define MAX_WAIT 10 // time in milliseconds
@@ -20,13 +32,13 @@ public:
 	uint8_t node_id;
 
 	MM485(unsigned char node_id);
-	virtual ~MM485();
+	virtual ~MM485() {};
 	void send(uint8_t to, const unsigned char* data, size_t size);
 	virtual void run();
 
 private:
 	unsigned char buffer[MAX_BUFFER_SIZE];
-	unsigned char *chr_in;
+	uint8_t* chr_in;
 	Packet* queue_in[SIZE_QUEUE];
 	Packet* queue_out[SIZE_QUEUE];
 	int idx_queue_in;
