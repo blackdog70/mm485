@@ -12,12 +12,11 @@
 #include <crc16.h>
 
 #define MAX_DATA_SIZE 16
-#define MAX_PACKET_SIZE 8+MAX_DATA_SIZE+1 // Take care do not exceed 254 chars 255=0xff if for EOM
+#define MAX_PACKET_SIZE 11+MAX_DATA_SIZE+1 // Take care do not exceed 254 chars 255=0xff if for EOM
 #define EOP (uint8_t)0xff
 #define ACK (uint8_t)0xfd
 #define ERR (uint8_t)0xfe
 #define EOM (uint8_t)0xff
-#define PACKET_TIMEOUT 1000 // millis
 
 class Packet {
 public:
@@ -33,11 +32,12 @@ public:
     Packet();
     Packet(uint8_t source, uint8_t dest, const unsigned char* data, size_t size);
     Packet(uint8_t source, uint8_t dest, uint16_t packet_id, const unsigned char* data, size_t size);
-//	virtual ~Packet() {};
 	virtual ~Packet() {};
 	bool validate();
 	Packet* deserialize(const unsigned char* data);
 	size_t serialize(unsigned char* data);
+	bool is_empty();
+	void clear();
 
 //private:
 	uint16_t id_calculate();

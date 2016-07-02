@@ -22,10 +22,11 @@ extern HardwareSerial SSerial;
 #endif
 
 
-#define NUM_PACKET 2
+#define NUM_PACKET 3
 #define MAX_BUFFER_SIZE NUM_PACKET*MAX_PACKET_SIZE
 #define SIZE_QUEUE 3
-#define MAX_WAIT 10 // time in milliseconds
+#define BUS_MAX_WAIT 10 // time in milliseconds
+#define PACKET_TIMEOUT 2000 // millis
 
 class MM485 {
 public:
@@ -39,18 +40,16 @@ public:
 private:
 	unsigned char buffer[MAX_BUFFER_SIZE];
 	uint8_t* chr_in;
-	Packet* queue_in[SIZE_QUEUE];
-	Packet* queue_out[SIZE_QUEUE];
-	int idx_queue_in;
-	int idx_queue_out;
+	Packet queue_in[SIZE_QUEUE];
+	Packet queue_out[SIZE_QUEUE];
 
 	void handle_data_stream();
 	void parse_queue_in();
 	void parse_queue_out();
-	void queue_add(Packet* queue[], Packet* pkt);
+	void queue_add(Packet queue[], Packet* pkt);
 	void read();
 	bool bus_ready();
-	bool find_pkt(Packet* queue[], Packet *);
+	bool find_pkt(Packet queue[], Packet *);
 
 protected:
 	/*

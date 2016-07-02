@@ -10,14 +10,7 @@
 #include "stdio.h"
 
 Packet::Packet() {
-	source = 0;
-	dest = 0;
-	packet_id = 0;
-	length = 0;
-	data[0] = 0;
-	crc = 0;
-	retry = 0;
-	timeout = 0;
+	clear();
 }
 
 Packet::Packet(uint8_t src, uint8_t dst, const unsigned char* d, size_t size) {
@@ -50,20 +43,19 @@ uint16_t Packet::crc_calculate() {
 	s[1] = length;
 	memcpy((uint8_t *)(s+2), data, length);
 
-//	Serial.println("==crc==");
-//	for(unsigned int i=0; i<s_len; i++) {
-//		Serial.print(s[i] & 255, HEX);
-//		Serial.print(" ");
-//	}
-//	Serial.println();
-//	Serial.println(crc16(s, s_len), HEX);
-//	Serial.println("==crc==");
-
-    return crc16(s, s_len);
+    return ModRTU_CRC(s, s_len);
 }
 
 bool Packet::validate() {
 	return crc == crc_calculate();
+}
+
+void Packet::clear() {
+	source = dest = 0;source = dest = packet_id = length = data[0] = crc = retry = timeout = 0;
+}
+
+bool Packet::is_empty() {
+	return source == 0 && dest == 0;
 }
 
 Packet* Packet::deserialize(const unsigned char* msg) {
@@ -72,7 +64,8 @@ Packet* Packet::deserialize(const unsigned char* msg) {
 	packet_id = ((unsigned char)msg[2] << 8) | (unsigned char)msg[3];
 	length = msg[4];
 	memcpy(data, (char *)(msg+5), length);
-	crc = ((unsigned char)msg[5+length] << 8) | (unsigned char)msg[6+length];
+	crc = ((unsigned char)msg[5+length] << 8) | (unsigned char)msg[6 + length];
+
 	return this;
 }
 
@@ -86,14 +79,6 @@ size_t Packet::serialize(unsigned char *msg) {
 	msg[5+length] = (unsigned char)((crc >> 8) & 0xff);
 	msg[6+length] = (unsigned char)(crc & 0xff);
 	msg[7+length] = EOP;
-
-//	Serial.println("==serialize==");
-//	for(unsigned int i=0; i<7+length; i++) {
-//		Serial.print(msg[i] & 255, HEX);
-//		Serial.print(" ");
-//	}
-//	Serial.println();
-//	Serial.println("==serialize==");
 
 	return 8+length;
 }
