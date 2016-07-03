@@ -12,7 +12,8 @@ import binascii
 from PyCRC.CRC16 import CRC16
 
 MAX_RETRY = 3
-MAX_WAIT = 0.2
+RETRY_DELAY = 0.05
+MAX_WAIT = 0.3
 RAND_WAIT = 10
 PACKET_SEND = 1
 PACKET_READY = 2
@@ -133,7 +134,7 @@ class Packet(object):
     def crc_calculate(self):
         crc = 0
         try:
-            crc = CRC16(modbus_flag=False).calculate(self.dest + self.length + bytes(self.data))
+            crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
             crc = bytearray(binascii.unhexlify(hex(crc)[2:].rjust(4, '0')))
         except Exception as e:
             self.logger.error("CRC error: %s", e)
@@ -228,6 +229,7 @@ class MM485(threading.Thread):
                     else:
                         self.logger.info("Bus is busy")
                         pkt.retry += 1  # TODO: Test retry
+                        time.sleep(RETRY_DELAY)
 
     def write(self, pkt):
         msg = pkt.serialize()
@@ -313,10 +315,10 @@ class MM485(threading.Thread):
 if __name__ == "__main__":
     # print(hex(CRC16().calculate(bytes([1, 6, 4, 0, 0xAC, 0x29, 0x70, 0x45]))))
 
-    orig = [2, 1, 0xD0, 1, 6, 4, 1, 0xF7, 0x64, 0x60, 0x45, 0xD0, 1, 0xff]
+    orig = [2, 1, 0x85, 0xf9, 0x03, 0x06, 0, 0x80, 0x85, 0xf9]
     enc = enc128(orig)
 
-    print([hex(i) for i in enc])
+    print([(hex(i), chr(i)) for i in enc])
     # enc = [2, 2, 0x38, 0x48, 0x66, 0, 1, 0, 0x7C, 0x7F, 0x2D, 0x2B, 0x64, 0x21, 0x5A, 0x7F]
 
     dec = dec128(enc)
