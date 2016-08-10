@@ -3,7 +3,6 @@ import time
 import threading
 import logging
 import logging.config
-import binascii
 
 # import serial
 # from serial.threaded import Packetizer, ReaderThread
@@ -24,7 +23,7 @@ MAX_DATA_SIZE = 50
 MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE + 1
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
 
 
 class NullPort(object):
@@ -109,17 +108,17 @@ class Packet(object):
         self.retry = 0
         self.timeout = 0
         if source is not None and dest is not None and data is not None:
-            self.source = source
-            if type(dest) is bytes:
-                self.dest = dest
-            else:
-                self.dest = bytes([dest])
-            if type(data) is str:
-                self.data = bytearray(data, "utf-8")
-            else:
-                self.data = data
+            # args = [source, dest, data, length, packet_id, crc]
+            # chk_str = [isinstance(i, str) for i in args]
+            # chk_bytes = [isinstance(i, bytes) for i in args]
+            # if all([i[0] or i[1] for i in zip(chk_str, chk_bytes)]):
+            self.source = source if isinstance(source, bytes) else bytes([source])
+            self.dest = dest if isinstance(dest, bytes) else bytes([dest])
+            self.data = bytearray(data, "utf-8") if isinstance(data, str) else data
             self.length = bytes([len(data)]) if length is None else bytes([length])
-            self.packet_id = self.id_calculate() if packet_id is None else packet_id
+            self.packet_id = self.id_calculate() if packet_id is None else (
+                packet_id if isinstance(packet_id, bytes) else bytes([packet_id])
+            )
             self.crc = self.crc_calculate() if crc is None else crc
 
     def __str__(self):
@@ -135,7 +134,7 @@ class Packet(object):
         crc = 0
         try:
             crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
-            crc = bytearray(binascii.unhexlify(hex(crc)[2:].rjust(4, '0')))
+            crc = crc.to_bytes(2, byteorder='big')
         except Exception as e:
             self.logger.error("CRC error: %s", e)
         return crc
@@ -153,6 +152,7 @@ class Packet(object):
             # self.data = bytes(dec128(msg[5:5 + msg[4]]))
             # self.length = bytes([len(self.data)])
             self.crc = bytes([msg[-2], msg[-1]])
+            logging.debug("Deserialized packet: ", self.__str__())
         except Exception as e:
             self.logger.error("Error deserialization of %s : %s", msg, e)
         return self
@@ -161,6 +161,19 @@ class Packet(object):
         # data = bytes(enc128(self.data))
         # return self.source + self.dest + self.packet_id + bytes([len(data)]) + data + self.crc + self.EOM
         return self.source + self.dest + self.packet_id + self.length + self.data + self.crc + self.EOP
+        
+    def decode(self, data):
+        self.logger.info('Decode stream %s', data)                
+        decoded = bytes(dec128(data))[:-1]
+        logging.debug("Decoded stream: %s", decoded)
+        return self.deserialize(decoded)
+    
+    def encode(self):
+        serialized = self.serialize()
+        self.logger.info('Encode stream %s', serialized)
+        encoded = bytes(enc128(serialized))
+        logging.debug("Encoded stream: %s", encoded)
+        return bytes([len(encoded)]) + encoded + Packet.EOM
 
 
 class MM485(threading.Thread):
@@ -232,33 +245,20 @@ class MM485(threading.Thread):
                         time.sleep(RETRY_DELAY)
 
     def write(self, pkt):
-        msg = pkt.serialize()
+        msg = pkt.encode()
         self.logger.info("Send %s [%s]", msg, pkt.retry)
-        self.logger.debug("Packet format: %s", pkt)
-        self._port.write(self.encode_packet(msg))
-
-    @staticmethod
-    def decode_packet(data):
-        return bytes(dec128(data)[:-1])
-
-    @staticmethod
-    def encode_packet(data):
-        encoded = bytes(enc128(data))
-        return bytes([len(encoded)]) + encoded + Packet.EOM
+        self._port.write(msg)
 
     def handle_data_stream(self, packet):
         if packet[0] != len(packet[1:]):
             self.logger.info("Data stream is invalid")
             return
-        self.logger.info('Decode stream %s', packet[1:])
-        decoded = self.decode_packet(packet[1:])
-        self.logger.info('Check for packet %s', decoded)
-        pkt = Packet().deserialize(decoded)
+        pkt = Packet().decode(packet[1:])
         self.logger.debug('Packet format: %s', pkt)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN:
             if pkt.validate() and pkt.dest == self._node_id:
                 if pkt not in self.queue_in:
-                    self.logger.info('Add %s to input queue', decoded)
+                    self.logger.info('Add %s to input queue', pkt)
                     with self.lock:
                         self.queue_in.append(pkt)
                 else:
