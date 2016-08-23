@@ -22,8 +22,12 @@ MAX_QUEUE_IN_LEN = 10
 MAX_DATA_SIZE = 50
 MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE + 1
 
+# QUERY: COMMAND > COMMAND_PATTERN
+# ANSWER: COMMAND <= COMMAND_PATTERN
+COMMAND_PATTERN = 0b01111111
+
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 
 class NullPort(object):
@@ -89,9 +93,9 @@ def dec128(data):
 
 
 class Packet(object):
-    EOP = b'\xfc'  # End of packet
-    ACK = b'\xfd'
-    ERR = b'\xfe'
+    ACK = b'\x7d'
+    ERR = b'\x7e'
+    EOP = b'\xfe'  # End of packet
     EOM = b'\xff'  # End Of message
 
     source = ''
@@ -102,16 +106,10 @@ class Packet(object):
     crc = ''
 
     def __init__(self, source=None, dest=None, data=None, packet_id=None, length=None, crc=None):
-        extra = {'node': source}
-        logger = logging.getLogger(__name__)
-        self.logger = logging.LoggerAdapter(logger, extra)
         self.retry = 0
         self.timeout = 0
+        self.logextra = {'node': source}
         if source is not None and dest is not None and data is not None:
-            # args = [source, dest, data, length, packet_id, crc]
-            # chk_str = [isinstance(i, str) for i in args]
-            # chk_bytes = [isinstance(i, bytes) for i in args]
-            # if all([i[0] or i[1] for i in zip(chk_str, chk_bytes)]):
             self.source = source if isinstance(source, bytes) else bytes([source])
             self.dest = dest if isinstance(dest, bytes) else bytes([dest])
             self.data = bytearray(data, "utf-8") if isinstance(data, str) else data
@@ -136,7 +134,7 @@ class Packet(object):
             crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
             crc = crc.to_bytes(2, byteorder='big')
         except Exception as e:
-            self.logger.error("CRC error: %s", e)
+            logging.error("CRC error: %s", e, extra=self.logextra)
         return crc
 
     def validate(self):
@@ -152,27 +150,25 @@ class Packet(object):
             # self.data = bytes(dec128(msg[5:5 + msg[4]]))
             # self.length = bytes([len(self.data)])
             self.crc = bytes([msg[-2], msg[-1]])
-            logging.debug("Deserialized packet: ", self.__str__())
+            logging.debug("Deserialized packet: %s", self.__str__(), extra=self.logextra)
         except Exception as e:
-            self.logger.error("Error deserialization of %s : %s", msg, e)
+            logging.error("Error deserialization of %s : %s", msg, e, extra=self.logextra)
         return self
 
     def serialize(self):
-        # data = bytes(enc128(self.data))
-        # return self.source + self.dest + self.packet_id + bytes([len(data)]) + data + self.crc + self.EOM
         return self.source + self.dest + self.packet_id + self.length + self.data + self.crc + self.EOP
         
     def decode(self, data):
-        self.logger.info('Decode stream %s', data)                
+        logging.info('Decode stream %s', data, extra=self.logextra)
         decoded = bytes(dec128(data))[:-1]
-        logging.debug("Decoded stream: %s", decoded)
+        logging.debug("Decoded stream: %s", decoded, extra=self.logextra)
         return self.deserialize(decoded)
     
     def encode(self):
         serialized = self.serialize()
-        self.logger.info('Encode stream %s', serialized)
+        logging.info('Encode stream %s', serialized, extra=self.logextra)
         encoded = bytes(enc128(serialized))
-        logging.debug("Encoded stream: %s", encoded)
+        logging.debug("Encoded stream: %s", encoded, extra=self.logextra)
         return bytes([len(encoded)]) + encoded + Packet.EOM
 
 
@@ -194,85 +190,106 @@ class MM485(threading.Thread):
         self._msg = None
         self._msg_in = None
         self._crc_in = 0
-        extra = {'node': node_id}
-        logger = logging.getLogger(__name__)
-        self.logger = logging.LoggerAdapter(logger, extra)
-        # self.extra = {'node': node_id}
+        self.logextra = {'node': node_id}
 
-    def parse_packet(self, packet):
-        self.logger.info('Querying for %s', packet.data)
+    def parse_query(self, packet):
+        logging.info('Querying for %s', packet.data, extra=self.logextra)
         if packet.data == Packet.ERR:
             pass
         return Packet.ACK
 
-    def parse_ack(self, packet):
+    def parse_answer(self, packet):
         pass
 
     def parse_queue_in(self):
+        """Parse input queue for queries and answers"""
         with self.lock:
             if self.queue_in:
-                self.logger.debug("Parse queue in: %s", [str(q) for q in self.queue_in])
+                logging.debug("Parse queue in: %s", [str(q) for q in self.queue_in], extra=self.logextra)
             pkt_received = list(self.queue_in)
             for pkt_in in pkt_received:
-                pkt_ack = [pkt_out for pkt_out in self.queue_out if pkt_in.packet_id == pkt_out.packet_id]
-                if pkt_ack:
-                    self.logger.info('Received %s as ack for %s', pkt_in.data, pkt_ack[0].data)
-                    self.parse_ack(pkt_in)
-                    self.queue_out.remove(pkt_ack[0])
+                if pkt_in.data[0] <= COMMAND_PATTERN:
+                    # An answer is in queue
+                    logging.info('Received %s as ack', pkt_in.data, extra=self.logextra)
+                    pkt_ack = [pkt_out for pkt_out in self.queue_out if pkt_in.packet_id == pkt_out.packet_id]
+                    if pkt_ack:
+                        logging.info('       for %s', pkt_ack[0].data, extra=self.logextra)
+                        self.parse_answer(pkt_in)
+                        self.queue_out.remove(pkt_ack[0])
+                    else:
+                        logging.info("Query not found, already answered or wrong packet??", extra=self.logextra)
                 else:
-                    data = self.parse_packet(pkt_in)
+                    # A query is in queue
+                    data = self.parse_query(pkt_in)
                     packet = Packet(source=self._node_id,
                                     dest=pkt_in.source,
                                     data=data,
                                     packet_id=pkt_in.packet_id)
-                    self.logger.info('Found %s', packet.data)
+                    logging.info('Found %s', packet.data, extra=self.logextra)
+
+                    # time.sleep(0.2)
+
                     self.write(packet)
-                self.logger.info('Msg completed')
+                logging.info('Msg completed', extra=self.logextra)
                 self.queue_in.remove(pkt_in)
 
     def parse_queue_out(self):
+        """Parse output queue for packet to send"""
         with self.lock:
             if self.queue_out:
-                self.logger.debug("Parse queue out: %s", [str(q) for q in self.queue_out])
+                logging.debug("Parse queue out: %s", [str(q) for q in self.queue_out], extra=self.logextra)
             for pkt in self.queue_out:
                 if time.time() - pkt.timeout > PACKET_TIMEOUT:
                     if self.bus_ready():
                         self.write(pkt)
                         pkt.timeout = time.time()
                     else:
-                        self.logger.info("Bus is busy")
+                        logging.info("Bus is busy", extra=self.logextra)
                         pkt.retry += 1  # TODO: Test retry
                         time.sleep(RETRY_DELAY)
 
     def write(self, pkt):
-        msg = pkt.encode()
-        self.logger.info("Send %s [%s]", msg, pkt.retry)
-        self._port.write(msg)
+        """Send a packet to serial port
 
-    def handle_data_stream(self, packet):
-        if packet[0] != len(packet[1:]):
-            self.logger.info("Data stream is invalid")
+        :param pkt: instance of packet
+        :return:
+        """
+        msg = pkt.encode()
+        logging.info("Send %s [%s]", msg, pkt.retry, extra=self.logextra)
+        self._port.setRTS(False)
+        self._port.write(msg)
+        time.sleep(0.005)
+        self._port.setRTS(True)
+
+    def handle_data_stream(self, stream):
+        """Check input data stream for validity
+
+        :param stream: stream of data
+        :return:
+        """
+        if stream[0] != len(stream[1:]):
+            logging.info("Data stream is invalid", extra=self.logextra)
             return
-        pkt = Packet().decode(packet[1:])
-        self.logger.debug('Packet format: %s', pkt)
+        pkt = Packet().decode(stream[1:])
+        logging.debug('Packet format: %s', pkt, extra=self.logextra)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN:
             if pkt.validate() and pkt.dest == self._node_id:
                 if pkt not in self.queue_in:
-                    self.logger.info('Add %s to input queue', pkt)
+                    logging.info('Add %s to input queue', pkt, extra=self.logextra)
                     with self.lock:
                         self.queue_in.append(pkt)
                 else:
-                    self.logger.info('Packet already in queue')
+                    logging.info('Packet already in queue', extra=self.logextra)
             else:
-                self.logger.info('Packet is invalid')
+                logging.info('Packet is invalid', extra=self.logextra)
         else:
-            self.logger.info('Input queue is full')
+            logging.info('Input queue is full', extra=self.logextra)
 
     def data_received(self, data):
-        """Buffer received data, find TERMINATOR, call handle_packet"""
+        """Bufferize received data, find TERMINATOR, call handle_data_stream"""
         if data:
             self.buffer.extend(data)
-            self.logger.info("Received %s", self.buffer)
+            logging.info("Received %s", self.buffer, extra=self.logextra)
         while self.TERMINATOR in self.buffer:
             data_stream, self.buffer = self.buffer.split(self.TERMINATOR, 1)
             self.handle_data_stream(data_stream)
@@ -286,27 +303,37 @@ class MM485(threading.Thread):
                 self.parse_queue_out()
                 time.sleep(0.01)
             except Exception as e:
-                self.logger.warning("Running error: %s", e)  # FIXME: argument must be an int, or have a fileno() method.
+                # FIXME: argument must be an int, or have a fileno() method.
+                logging.warning("Running error: %s", e, extra=self.logextra)
         pass
 
+    #TODO: To be completed
     def join(self, timeout=None):
+        """Stop the main thread"""
         with self.lock:
             self._stop.set()
             super(MM485, self).join(timeout)
 
     def send(self, dest_node_id, data, msg_id=None):
+        """Push a packet on output queue"""
         if len(data) < MAX_PACKET_SIZE:
-            if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
-                with self.lock:
-                    packet = Packet(self._node_id, dest_node_id, data, msg_id)
-                    if packet not in self.queue_out:
-                        self.queue_out.append(packet)
+            command = ord(data[0]) if isinstance(data, str) else data[0]
+            if command > COMMAND_PATTERN:
+                if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
+                    with self.lock:
+                        packet = Packet(self._node_id, dest_node_id, data, msg_id)
+                        if packet not in self.queue_out:
+                            self.queue_out.append(packet)
+            else:
+                logging.critical("Command must be query type (>%s)", COMMAND_PATTERN, extra=self.logextra)
         else:
-            self.logger.critical("The data exceeds the maximum size of %s characters", MAX_DATA_SIZE)
+            logging.critical("The data exceeds the maximum size of %s characters", MAX_DATA_SIZE, extra=self.logextra)
 
-    # wait until no chars in buffer or TIMEOUT
-    # return buffer's chars number
     def bus_ready(self):
+        """Wait until no chars in buffer or TIMEOUT
+
+        :return : buffer's chars number
+        """
         start = time.time()
         while self._port.in_waiting != 0 and time.time() - start < MAX_WAIT:
             time.sleep(0.01)
