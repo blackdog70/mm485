@@ -13,7 +13,7 @@ Packet::Packet() {
 	clear();
 }
 
-Packet::Packet(uint8_t src, uint8_t dst, const unsigned char* d, size_t size) {
+Packet::Packet(uint8_t src, uint8_t dst, const unsigned char* d, uint8_t size) {
 	source = src;
 	dest = dst;
 	length = size;
@@ -22,7 +22,7 @@ Packet::Packet(uint8_t src, uint8_t dst, const unsigned char* d, size_t size) {
 	crc = crc_calculate();
 }
 
-Packet::Packet(uint8_t src, uint8_t dst, uint16_t id, const unsigned char* d, size_t size) {
+Packet::Packet(uint8_t src, uint8_t dst, uint16_t id, const unsigned char* d, uint8_t size) {
 	source = src;
 	dest = dst;
 	length = size;
@@ -36,12 +36,12 @@ uint16_t Packet::id_calculate() {
 }
 
 uint16_t Packet::crc_calculate() {
-	size_t s_len = 2+length;
-	char s[s_len];
+	uint8_t s_len = 2 + length;
+	char s[s_len + 1];
 
 	s[0] = dest;
 	s[1] = length;
-	memcpy((uint8_t *)(s+2), data, length);
+	memcpy((uint8_t *)(s + 2), data, length);
 
     return ModRTU_CRC(s, s_len);
 }
@@ -51,7 +51,7 @@ bool Packet::validate() {
 }
 
 void Packet::clear() {
-	source = dest = 0;source = dest = packet_id = length = data[0] = crc = retry = timeout = 0;
+	source = dest = packet_id = length = data[0] = crc = retry = timeout = 0;
 }
 
 bool Packet::is_empty() {
@@ -69,7 +69,7 @@ Packet* Packet::deserialize(const unsigned char* msg) {
 	return this;
 }
 
-size_t Packet::serialize(unsigned char *msg) {
+uint8_t Packet::serialize(unsigned char *msg) {
 	msg[0] = source;
 	msg[1] = dest;
 	msg[2] = (unsigned char)((packet_id >> 8) & 0xff);

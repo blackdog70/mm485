@@ -14,11 +14,12 @@
 
 #define NUM_PACKET 2
 #define MAX_BUFFER_SIZE NUM_PACKET*MAX_PACKET_SIZE
-#define SIZE_QUEUE 3
-#define BUS_MAX_WAIT 300 // time in milliseconds
-#define PACKET_TIMEOUT 1000 // millis
-#define TX_WAIT 10
-#define RX_WAIT 10
+#define SIZE_QUEUE 2
+#define BUS_MAX_WAIT 300UL // time in milliseconds
+#define PACKET_TIMEOUT 2000UL // millis
+#define PACKET_DELAY 50
+#define TX_WAIT 1
+#define RX_WAIT 1
 #define RETRY_WAIT 5
 
 #ifdef SOFTWARESERIAL
@@ -27,7 +28,7 @@
 extern SoftwareSerial rs485;
 extern const int en485;
 #else
-extern HardwareSerial SSerial;
+//extern HardwareSerial SSerial;
 #endif
 
 
@@ -37,7 +38,7 @@ public:
 
 	MM485(unsigned char node_id);
 	virtual ~MM485() {};
-	void send(uint8_t to, const unsigned char* data, size_t size);
+	void send(uint8_t to, const unsigned char* data, uint8_t size);
 	virtual void run();
 
 private:
@@ -61,7 +62,7 @@ protected:
 	 * fill data with a response for Packet
 	 * return size of data
 	 */
-	virtual size_t parse_packet(unsigned char *data, Packet*);
+	virtual uint8_t parse_packet(unsigned char *data, Packet*);
 	virtual void parse_ack(Packet*) {};
 	void write(Packet* pkt);
 };
