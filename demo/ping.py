@@ -94,7 +94,7 @@ class Ping(MM485):
 
 if __name__ == '__main__':
     # ser = serial_for_url('/dev/ttyUSB0', rtscts=True, baudrate=38400)
-    ser = rs485.RS485('/dev/ttyUSB0', baudrate=38400)
+    ser = rs485.RS485('/dev/ttyUSB0', baudrate=19200)
     # ser.rs485_mode = rs485.RS485Settings(rts_level_for_rx=True,
     #                                      rts_level_for_tx=False,
     #                                      delay_before_rx=0.01,
@@ -113,10 +113,10 @@ if __name__ == '__main__':
         # a.send(2, bytearray((QUERIES['CONFIG'], PARAMETERS['DHT'], 10)))
         # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['HBT'], 30)))
         # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['PIR'], 5)))
-        # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['LUX'], 10)))
+        # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['LUX'], 2)))
         # a.send(2, bytearray((QUERIES['RESET'],)))
         while True:
-            a.send(3, bytearray((QUERIES['MEM'],)))
+            # a.send(3, bytearray((QUERIES['MEM'],)))
             print("Loop")
             time.sleep(2)
     except KeyboardInterrupt:
