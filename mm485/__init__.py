@@ -11,7 +11,7 @@ import logging.config
 from PyCRC.CRC16 import CRC16
 
 MAX_RETRY = 3
-RETRY_DELAY = 0.05
+RETRY_DELAY = 0.1
 MAX_WAIT = 0.3
 RAND_WAIT = 10
 PACKET_SEND = 1
@@ -19,15 +19,28 @@ PACKET_READY = 2
 PACKET_TIMEOUT = 2
 MAX_QUEUE_OUT_LEN = 13
 MAX_QUEUE_IN_LEN = 10
-MAX_DATA_SIZE = 50
-MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE + 1
+MAX_DATA_SIZE = 10
+TX_DELAY = 2  # milliseconds
+RX_DELAY = 2  # milliseconds
+MAX_PACKET_SIZE = 10 + MAX_DATA_SIZE + 1
 
 # QUERY: COMMAND > COMMAND_PATTERN
 # ANSWER: COMMAND <= COMMAND_PATTERN
 COMMAND_PATTERN = 0b01111111
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+logging.basicConfig(level=logging.WARNING, format=FORMAT)
+
+
+def mdelay(value):
+    """ Delay in milliseconds"""
+    if value > 200:
+        raise BaseException("{} too long for udelay. Max value accepted is 200!".format(value))
+    start = time.time()
+    while time.time() < (start + (value / 1000)):
+        pass
+    return time.time()
+
 
 
 class NullPort(object):
@@ -190,6 +203,7 @@ class MM485(threading.Thread):
         self._msg = None
         self._msg_in = None
         self._crc_in = 0
+        self.tx_complete = ((MAX_PACKET_SIZE / (self._port.baudrate / 1000.0 / 8.0)) + RX_DELAY) # ms
         self.logextra = {'node': node_id}
 
     def parse_query(self, packet):
@@ -227,8 +241,6 @@ class MM485(threading.Thread):
                                     packet_id=pkt_in.packet_id)
                     logging.info('Found %s', packet.data, extra=self.logextra)
 
-                    # time.sleep(0.2)
-
                     self.write(packet)
                 logging.info('Msg completed', extra=self.logextra)
                 self.queue_in.remove(pkt_in)
@@ -238,15 +250,11 @@ class MM485(threading.Thread):
         with self.lock:
             if self.queue_out:
                 logging.debug("Parse queue out: %s", [str(q) for q in self.queue_out], extra=self.logextra)
-            for pkt in self.queue_out:
-                if time.time() - pkt.timeout > PACKET_TIMEOUT:
-                    if self.bus_ready():
-                        self.write(pkt)
-                        pkt.timeout = time.time()
-                    else:
-                        logging.info("Bus is busy", extra=self.logextra)
-                        pkt.retry += 1  # TODO: Test retry
-                        time.sleep(RETRY_DELAY)
+            if not self._port.in_waiting:
+                for pkt in self.queue_out:
+                    self.write(pkt)
+                    pkt.timeout = time.time()
+                    mdelay(2*self.tx_complete)
 
     def write(self, pkt):
         """Send a packet to serial port
@@ -257,8 +265,11 @@ class MM485(threading.Thread):
         msg = pkt.encode()
         logging.info("Send %s [%s]", msg, pkt.retry, extra=self.logextra)
         self._port.setRTS(False)
+        mdelay(TX_DELAY)
+        tx_start = time.time()
         self._port.write(msg)
-        time.sleep(0.005)
+        while (time.time() - tx_start) < (self.tx_complete / 1000.0):
+            pass
         self._port.setRTS(True)
 
     def handle_data_stream(self, stream):

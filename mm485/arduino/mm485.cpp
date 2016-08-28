@@ -16,6 +16,9 @@ const int en485 = 4;	// 1;	// Pin 6 Attiny85
 SoftwareSerial rs485(rx,tx);
 #endif
 
+// FIXME: Baudrate da variabile o costante
+unsigned long TX_COMPLETE = (unsigned int)(float(float(MAX_PACKET_SIZE) / (19.2 / 8))) + RX_WAIT;
+
 MM485::MM485(unsigned char node_id) {
 	// TODO Auto-generated constructor stub
 	MM485::node_id = node_id;
@@ -62,6 +65,8 @@ void MM485::parse_queue_in() {
 				uint8_t size = parse_packet(data, queue_in[i]);
 				Packet pkt(node_id, queue_in[i]->source, queue_in[i]->packet_id, data, size);
 
+				delay(TX_DELAY);
+
 				write(&pkt);
 			}
 			delete queue_in[i];
@@ -70,16 +75,18 @@ void MM485::parse_queue_in() {
 }
 
 void MM485::parse_queue_out() {
-	for(int i = 0; i < SIZE_QUEUE; i++)
-		if (queue_out[i] != NULL && ((millis() - queue_out[i]->timeout) > PACKET_TIMEOUT)) {
-			if (bus_ready()) {
+#ifdef SOFTWARESERIAL
+	if (rs485.available() == 0)
+#else
+	if (Serial.available() == 0)
+#endif
+		for(int i = 0; i < SIZE_QUEUE; i++)
+//			if (queue_out[i] != NULL && ((millis() - queue_out[i]->timeout) > PACKET_TIMEOUT)) {
+			if (queue_out[i] != NULL) {
 				write(queue_out[i]);
 				queue_out[i]->timeout = millis();
-			} else {
-				queue_out[i]->retry++;
-				delay(RETRY_WAIT);
+				delay(2*TX_COMPLETE);
 			}
-		}
 }
 
 void MM485::write(Packet* pkt) {
@@ -97,10 +104,11 @@ void MM485::write(Packet* pkt) {
 	uint8_t* buffer = enc;
 	digitalWrite(en485, HIGH);          // Enable write on 485
 	delay(TX_WAIT);
+	unsigned long tx_start = millis();  // Used to wait for complete transmission
 	while(size--)
 		rs485.write(*buffer++);
 	rs485.flush();
-	delay(RX_WAIT);
+	while ((millis() - tx_start) < TX_COMPLETE) {}; // wait for complete transmission
 	digitalWrite(en485, LOW);			// 485 listening mode
 #else
 	Serial.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
@@ -115,16 +123,6 @@ void MM485::queue_add(Packet* queue[], Packet* pkt) {
 		}
 	delete pkt;
 }
-
-//void sendrs(uint8_t* buffer, size_t size) {
-//	digitalWrite(en485, HIGH);          // Enable write on 485
-//	delay(TX_WAIT);
-//	while(size--)
-//		rs485.write(*buffer++);
-//	rs485.flush();
-//	delay(RX_WAIT);
-//	digitalWrite(en485, LOW);
-//}
 
 void MM485::handle_data_stream() {
 	unsigned char stream[chr_in - buffer - 1]; // -1 is for LEN char
@@ -150,20 +148,27 @@ void MM485::handle_data_stream() {
 	}
 }
 
+void MM485::clear_buffer() {
+	buffer[0] = 0;		// Clear buffer
+	chr_in = buffer;	// Repositioning of pointer chr_in
+}
+
 void MM485::read() {
 #ifdef SOFTWARESERIAL
-	while (rs485.available() > 0 && chr_in < buffer + sizeof(buffer)) {
+	while (rs485.available() > 0) {
 		*chr_in = (uint8_t)rs485.read();
 #else
-	while (Serial.available() > 0 && chr_in < buffer + sizeof(buffer)) {
+	while (Serial.available() > 0) {
 		*chr_in = (uint8_t)Serial.read();
 #endif
 		if (*chr_in == EOM && chr_in > buffer) {
 			handle_data_stream();
-			buffer[0] = 0;		// Clear buffer
-			chr_in = buffer;	// Repositioning of pointer chr_in
+			clear_buffer();
 		} else {
-			chr_in++;
+			if (chr_in >= buffer + sizeof(buffer)) {
+				clear_buffer();
+			} else
+				chr_in++;
 		}
 	}
 }
@@ -184,13 +189,3 @@ void MM485::send(uint8_t node_dest, const unsigned char* data, uint8_t size) {
     }
 }
 
-bool MM485::bus_ready() {
-	unsigned long start = millis();
-#ifdef SOFTWARESERIAL
-	while (rs485.available() > 0 && millis() - start < BUS_MAX_WAIT);
-	return rs485.available() == 0;
-#else
-	while (Serial.available() > 0 && millis() - start < BUS_MAX_WAIT);
-	return Serial.available() == 0;
-#endif
-}

@@ -20,7 +20,7 @@
 #define PACKET_DELAY 50
 #define TX_WAIT 1
 #define RX_WAIT 1
-#define RETRY_WAIT 5
+#define TX_DELAY 5
 
 #ifdef SOFTWARESERIAL
 #include <SoftwareSerial.h>
@@ -56,6 +56,7 @@ private:
 	void read();
 	bool bus_ready();
 	bool find_pkt(Packet* queue[], Packet *);
+	void clear_buffer();
 
 protected:
 	/*
