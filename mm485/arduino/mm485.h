@@ -8,19 +8,19 @@
 #ifndef MM485_H_
 #define MM485_H_
 
-#define SOFTWARESERIAL
-
 #include <packet.h>
+#include <settings.h>
 
 #define NUM_PACKET 2
-#define MAX_BUFFER_SIZE NUM_PACKET*MAX_PACKET_SIZE
+#define MAX_BUFFER_SIZE (NUM_PACKET*MAX_PACKET_SIZE)
 #define SIZE_QUEUE 2
-#define BUS_MAX_WAIT 300UL // time in milliseconds
+// #define BUS_MAX_WAIT 300UL // time in milliseconds
 #define PACKET_TIMEOUT 2000UL // millis
-#define PACKET_DELAY 50
 #define TX_WAIT 1
 #define RX_WAIT 1
 #define TX_DELAY 5
+#define PACKET_DELAY 5 // millis, in source the total delay will be PACKET_DELAY * node_id
+
 
 #ifdef SOFTWARESERIAL
 #include <SoftwareSerial.h>

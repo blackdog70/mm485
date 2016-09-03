@@ -10,6 +10,7 @@
 
 #include "Arduino.h"
 #include <crc16.h>
+#include <settings.h>
 
 // Full packet Size
 // 1 char packet len
