@@ -1,8 +1,8 @@
 #include "codec128.h"
 
-int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
+uint8_t enc128(unsigned char* buf, const unsigned char* data, uint8_t size) {
     char n = 0;
-    int buf_idx = 0;
+    uint8_t buf_idx = 0;
     uint16_t lsb;
     uint16_t msb = 0;
 
@@ -38,9 +38,9 @@ int enc128(unsigned char* buf, const unsigned char* data, size_t size) {
     return buf_idx;
 }
 
-int dec128(unsigned char* buf, const unsigned char* data, size_t size) {
+uint8_t dec128(unsigned char* buf, const unsigned char* data, uint8_t size) {
 	char n = 1;
-	int buf_idx = 0;
+	uint8_t buf_idx = 0;
 	uint16_t lsb = data[0];
 	uint16_t msb;
     for (unsigned int c = 1; c < size; c++) {

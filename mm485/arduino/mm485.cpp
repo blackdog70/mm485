@@ -8,9 +8,9 @@
 #include "Arduino.h"
 #include "mm485.h"
 #include "codec128.h"
+#include "FreeMemory.h"
 
-#ifdef SOFTWARESERIAL
-#if DEBUG
+#ifdef DEBUG
 	const int rx= 2;		// Arduino Nano
 	const int tx= 3;		// Arduino Nano
 	const int en485 = 4;	// Arduino Nano
@@ -20,7 +20,6 @@
 	const int en485 = 1;	// Pin 6 Attiny85
 #endif
 SoftwareSerial rs485(rx,tx);
-#endif
 
 // FIXME: Baudrate da variabile o costante
 unsigned long TX_COMPLETE = (unsigned int)(float(float(MAX_PACKET_SIZE) / ((BAUDRATE / 1000) / 8))) + RX_WAIT;
@@ -30,181 +29,190 @@ MM485::MM485(unsigned char node_id) {
 	MM485::node_id = node_id;
 	*buffer = 0;
 	chr_in = buffer;
-	idx_queue_in = 0;
-	idx_queue_out = 0;
-	for (int i=0; i<NUM_PACKET; i++)
-		queue_in[i] = queue_out[i] = NULL;
+	packet_in = (Packet*)malloc(PACKET_SIZE);
+	packet_out = (Packet*)malloc(PACKET_SIZE);
+	out_ready = 0;
+	out_delay = 0;
+	retry = 0;
 }
 
-bool MM485::find_pkt(Packet* queue[], Packet *pkt) {
-	for (int i=0; i<SIZE_QUEUE; i++)
-		if (pkt->crc == queue[i]->crc)
-			return true;
-	return false;
+uint8_t MM485::parse_packet(packet_data *data) {
+	return 0;
 }
 
-uint8_t MM485::parse_packet(unsigned char *data, Packet* pkt) {
-	data[0] = ACK;
-	return 1;
-}
-
-void MM485::parse_queue_in() {
-	int idx_ack = -1;
-	for(int i = 0; i < SIZE_QUEUE; i++)
-		if (queue_in[i] != NULL) {
-		    if (queue_in[i]->data[0] <= COMMAND_PATTERN) {
+uint16_t MM485::crc_calculate(Packet* pkt) {
 #ifdef DEBUG
-				Serial.print("Reply: ");
-				Serial.println(queue_in[i]->data[0], HEX);
+	Serial.println("Data for CRC");
+	for(int i=0; i< 2 + pkt->core.data_size; i++) {
+		Serial.print(i);
+		Serial.print(" :");
+		Serial.println(*(&(pkt->core.dest) + i), HEX);
+	}
 #endif
-		        // pkt is an answer
-                for(int j = 0; j < SIZE_QUEUE; j++)
-                    if (queue_out[j] != NULL && queue_in[i]->packet_id == queue_out[j]->packet_id)
-                        idx_ack = j;
-                if (idx_ack >= 0) {
-                    parse_ack(queue_in[i]);
-                    delete queue_out[idx_ack];
-                    queue_out[idx_ack] = NULL;
-                }
-			} else {
-			    // pkt is a query
-				unsigned char data[MAX_DATA_SIZE];
-
-				uint8_t size = parse_packet(data, queue_in[i]);
-				Packet pkt(node_id, queue_in[i]->source, queue_in[i]->packet_id, data, size);
-
-				delay(TX_DELAY);
-
-				write(&pkt);
-			}
-			delete queue_in[i];
-			queue_in[i] = NULL;
-		}
+    return ModRTU_CRC((char *)&(pkt->core.dest), 2 + pkt->core.data_size); // 4 is sizeof dest + data_size + packet_id
 }
 
-void MM485::parse_queue_out() {
-	/* The message queue will be sent only if there is no incoming data.
-	 * Each packet has his own timeout to avoid collisions, at start the timeout is 0 so the packet is sent immediately.
-	 * If there is collisions or the network is down the packet will be resent so the timeout will have a value to delay
-	 * the packet transmission in order to give a kind of priority to the messages.
-	 * The node id of the device will be used to calculate the delay and drive this priority.
-	 */
-#ifdef SOFTWARESERIAL
-	if (rs485.available() == 0)
-#else
-	if (Serial.available() == 0)
-#endif
-		for(int i = 0; i < SIZE_QUEUE; i++)
-			if (queue_out[i] != NULL && ((millis() - queue_out[i]->timeout) > (PACKET_DELAY * node_id))) {
-//			if (queue_out[i] != NULL) {
-				write(queue_out[i]);
-				queue_out[i]->timeout = millis();
-				delay(2*TX_COMPLETE);
-			}
+uint16_t MM485::id_calculate(Packet* pkt) {
+	return crc_calculate(pkt);
+}
+
+uint8_t MM485::validate(Packet* pkt) {
+	return pkt->core.crc == crc_calculate(pkt);
 }
 
 void MM485::write(Packet* pkt) {
-	unsigned char msg[MAX_PACKET_SIZE];
-	unsigned char enc[MAX_PACKET_SIZE];
+	unsigned char stream[sizeof(packet_core) + pkt->core.data_size + 1];
 
-	uint8_t size = pkt->serialize(msg);
+	pkt->core.source = node_id;
+	pkt->core.crc = crc_calculate(pkt);
 
-	enc[0] = enc128((unsigned char*)(enc+1), msg, size);
-	enc[enc[0] + 1] = EOM;
+#ifdef DEBUG
+	Serial.println("Stream");
+	unsigned char *p = (uint8_t*)pkt;
+	for(unsigned int i=0; i < sizeof(packet_core) + pkt->core.data_size; i++) {
+		Serial.print(i);
+		Serial.print(" :");
+		Serial.println(*(p + i), HEX);
+	}
+#endif
 
-#ifdef SOFTWARESERIAL
-	size = enc[0] + 2;					// + 2 is for 1 byte for stream length and 1 byte for EOM
-	uint8_t* buffer = enc;
-	digitalWrite(en485, HIGH);          // Enable write on 485
+	uint8_t size = enc128(stream,(uint8_t*)pkt, sizeof(packet_core) + pkt->core.data_size);
+
+#ifdef DEBUG
+	Serial.println("Stream encoded");
+	for(int i=0; i<size; i++) {
+		Serial.print(i);
+		Serial.print(" :");
+		Serial.println(stream[i], HEX);
+	}
+#endif
+
+	digitalWrite(en485, HIGH);          			// 485 write mode
 	delay(TX_WAIT);
-	unsigned long tx_start = millis();  // Used to wait for complete transmission
-	while(size--)
-		rs485.write(*buffer++);
+	unsigned long tx_start = millis();  			// Used to wait for complete transmission
+	rs485.write(size);
+	for(int i = 0; i < size; i++)
+		rs485.write(stream[i]);
+	rs485.write(EOM);
 	rs485.flush();
 	while ((millis() - tx_start) < TX_COMPLETE) {}; // wait for complete transmission
-	digitalWrite(en485, LOW);			// 485 listening mode
-#else
-	Serial.write(enc, enc[0] + 2);		// + 2 is for 1 byte for stream length and 1 byte for EOM
-#endif
-}
+	digitalWrite(en485, LOW);						// 485 read mode
 
-void MM485::queue_add(Packet* queue[], Packet* pkt) {
-	for(unsigned int i = 0; i < SIZE_QUEUE; i++)
-		if (queue[i] == NULL) {
-			queue[i] = pkt;
-			return;
-		}
-	delete pkt;
-}
-
-void MM485::handle_data_stream() {
-	unsigned char stream[chr_in - buffer - 1]; // -1 is for LEN char
-
-	if (buffer[0] != sizeof(stream)) {
 #ifdef DEBUG
-		Serial.print("Invalid stream: ");
-		Serial.println(buffer[0]);
+	Serial.println("Stream sent");
 #endif
-		return;
-	}
-
-	dec128(stream, (unsigned char*)(buffer + 1), sizeof(stream));
-
-	Packet *pkt = new Packet();
-
-	pkt->deserialize((const unsigned char*)stream);
-
-	if (pkt->validate() && pkt->dest == node_id && !find_pkt(queue_in, pkt)) {
-#ifdef DEBUG
-		Serial.println("Packet OK");
-#endif
-		queue_add(queue_in, pkt);
-	} else {
-#ifdef DEBUG
-		Serial.println("Invalid packet");
-#endif
-		delete pkt;
-	}
 }
 
 void MM485::clear_buffer() {
 	buffer[0] = 0;		// Clear buffer
 	chr_in = buffer;	// Repositioning of pointer chr_in
+	rs485.flush();		// Clear serial buffer
 }
 
-void MM485::read() {
-#ifdef SOFTWARESERIAL
-	while (rs485.available() > 0) {
-		*chr_in = (uint8_t)rs485.read();
-#else
-	while (Serial.available() > 0) {
-		*chr_in = (uint8_t)Serial.read();
+uint8_t MM485::run() {
+	if (rs485.available() > 0) {
+#ifdef DEBUG
+		Serial.println("Receive packet");
 #endif
-		if (*chr_in == EOM && chr_in > buffer) {
-			handle_data_stream();
-			clear_buffer();
-		} else {
-			if (chr_in >= buffer + sizeof(buffer)) {
+		while (rs485.available() > 0) {
+			*chr_in = (uint8_t)rs485.read();
+			if (*chr_in == EOM && chr_in > buffer) {
+				uint8_t received = chr_in - buffer;
+				if (buffer[0] == received) {
+					Packet* packet = (Packet*)realloc(packet_in, received);
+					if (packet != NULL) {
+						packet_in = packet;
+						dec128((unsigned char*)packet_in, (unsigned char*)(buffer + 1), received);
+						if (validate(packet_in) && packet_in->core.dest == node_id) {
+#ifdef DEBUG
+							Serial.println("Packet OK");
+#endif
+							if (packet_in->data.code <= COMMAND_PATTERN) {
+#ifdef DEBUG
+								Serial.print("Reply: ");
+								Serial.println(packet_in->data.code, HEX);
+#endif
+								// pkt is an answer
+								if (packet_in->core.packet_id == packet_out->core.packet_id) {
+									parse_ack(packet_in);
+									out_ready = 0;								// Packet transmitted
+								}
+							} else {
+								// pkt is a query
+								Packet pkt;
+
+								pkt.core.dest = packet_in->core.source;
+								pkt.core.packet_id = packet_in->core.packet_id;
+								pkt.core.data_size = parse_packet((packet_data *)&packet_in->data);
+
+								delay(TX_DELAY);
+
+								write(&pkt);
+							}
+						} else {
+#ifdef DEBUG
+							Serial.println("Invalid packet");
+#endif
+						}
+					} else {
+			    		free(packet_in);
+#ifdef DEBUG
+						Serial.println("Memory error!!!");
+#endif
+					}
+				} else {
+#ifdef DEBUG
+					Serial.print("Invalid stream: ");
+					Serial.println(buffer[0]);
+#endif
+				}
 				clear_buffer();
-			} else
-				chr_in++;
+			} else {
+				if (chr_in >= buffer + sizeof(buffer)) {
+					clear_buffer();
+				} else
+					chr_in++;
+			}
+		}
+	} else {
+		/* The message queue will be sent only if there is no incoming data.
+		 * Each packet has his own timeout to avoid collisions, at start the timeout is 0 so the packet is sent immediately.
+		 * If there is collisions or the network is down the packet will be resent so the timeout will have a value to delay
+		 * the packet transmission in order to give a kind of priority to the messages.
+		 * The node id of the device will be used to calculate the delay and drive this priority.
+		 */
+		if (out_ready && ((millis() - out_delay) > (PACKET_DELAY * node_id))) {
+#ifdef DEBUG
+			Serial.println("Send packet");
+#endif
+			write(packet_out);
+			out_delay = millis();
+			delay(2*TX_COMPLETE);
+#ifdef DEBUG
+			Serial.println(freeMemory());
+			Serial.println("PACKET SENT");
+#endif
 		}
 	}
+	return !out_ready;
 }
 
-void MM485::run() {
-	read();
-	parse_queue_in();
-	parse_queue_out();
-}
-
-void MM485::send(uint8_t node_dest, const unsigned char* data, uint8_t size) {
-    if (size <= MAX_DATA_SIZE) {
-		Packet *pkt = new Packet(node_id, node_dest, data, size);
-		if (!find_pkt(queue_out, pkt))
-			queue_add(queue_out, pkt);
-		else
-			delete pkt;
+void MM485::send(uint8_t node_dest, packet_data* data, uint8_t size) {
+    if (size <= MAX_DATA_SIZE and !out_ready) {
+    	Packet* packet = (Packet*)realloc(packet_out, sizeof(Packet) + size);
+    	if (packet != NULL) {
+    		packet_out = packet;
+			packet_out->core.dest = node_dest;
+			packet_out->core.data_size = size;
+			memcpy((packet_data*)&packet_out->data, data, size);
+			packet_out->core.packet_id = id_calculate(packet_out);
+			out_ready = 1;														// packet Ready for transmission
+    	} else {
+    		free(packet_out);
+#ifdef DEBUG
+			Serial.println("Memory error!!!");
+#endif
+    	}
     }
 }
 
