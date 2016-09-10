@@ -145,7 +145,7 @@ class Packet(object):
         crc = 0
         try:
             crc = CRC16(modbus_flag=True).calculate(self.dest + self.length + bytes(self.data))
-            crc = crc.to_bytes(2, byteorder='big')
+            crc = crc.to_bytes(2, byteorder='little')
         except Exception as e:
             logging.error("CRC error: %s", e, extra=self.logextra)
         return crc
@@ -155,25 +155,25 @@ class Packet(object):
 
     def deserialize(self, msg):
         try:
-            self.source = bytes([msg[0]])
-            self.dest = bytes([msg[1]])
+            self.crc = bytes([msg[0], msg[1]])
             self.packet_id = bytes([msg[2], msg[3]])
-            self.length = bytes([msg[4]])
-            self.data = msg[5:5 + self.length[0]]
+            self.source = bytes([msg[4]])
+            self.dest = bytes([msg[5]])
+            self.length = bytes([msg[6]])
+            self.data = msg[7:7 + self.length[0]]
             # self.data = bytes(dec128(msg[5:5 + msg[4]]))
             # self.length = bytes([len(self.data)])
-            self.crc = bytes([msg[-2], msg[-1]])
             logging.debug("Deserialized packet: %s", self.__str__(), extra=self.logextra)
         except Exception as e:
             logging.error("Error deserialization of %s : %s", msg, e, extra=self.logextra)
         return self
 
     def serialize(self):
-        return self.source + self.dest + self.packet_id + self.length + self.data + self.crc + self.EOP
+        return self.crc + self.packet_id + self.source + self.dest + self.length + self.data
         
     def decode(self, data):
         logging.info('Decode stream %s', data, extra=self.logextra)
-        decoded = bytes(dec128(data))[:-1]
+        decoded = bytes(dec128(data))
         logging.debug("Decoded stream: %s", decoded, extra=self.logextra)
         return self.deserialize(decoded)
     
@@ -182,7 +182,7 @@ class Packet(object):
         logging.info('Encode stream %s', serialized, extra=self.logextra)
         encoded = bytes(enc128(serialized))
         logging.debug("Encoded stream: %s", encoded, extra=self.logextra)
-        return bytes([len(encoded)]) + encoded + Packet.EOM
+        return encoded
 
 
 class MM485(threading.Thread):
@@ -267,7 +267,9 @@ class MM485(threading.Thread):
         self._port.setRTS(False)
         mdelay(TX_DELAY)
         tx_start = time.time()
+        self._port.write([len(msg)])
         self._port.write(msg)
+        self._port.write([self.TERMINATOR])
         while (time.time() - tx_start) < (self.tx_complete / 1000.0):
             pass
         self._port.setRTS(True)

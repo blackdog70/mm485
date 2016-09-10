@@ -56,10 +56,6 @@ uint16_t MM485::id_calculate(Packet* pkt) {
 	return crc_calculate(pkt);
 }
 
-uint8_t MM485::validate(Packet* pkt) {
-	return pkt->core.crc == crc_calculate(pkt);
-}
-
 void MM485::write(Packet* pkt) {
 	unsigned char stream[sizeof(packet_core) + pkt->core.data_size + 1];
 
@@ -117,13 +113,13 @@ uint8_t MM485::run() {
 		while (rs485.available() > 0) {
 			*chr_in = (uint8_t)rs485.read();
 			if (*chr_in == EOM && chr_in > buffer) {
-				uint8_t received = chr_in - buffer;
+				uint8_t received = chr_in - buffer - 1;
 				if (buffer[0] == received) {
 					Packet* packet = (Packet*)realloc(packet_in, received);
 					if (packet != NULL) {
 						packet_in = packet;
 						dec128((unsigned char*)packet_in, (unsigned char*)(buffer + 1), received);
-						if (validate(packet_in) && packet_in->core.dest == node_id) {
+						if (packet_in->core.crc == crc_calculate(packet_in) && packet_in->core.dest == node_id) {
 #ifdef DEBUG
 							Serial.println("Packet OK");
 #endif
@@ -140,10 +136,21 @@ uint8_t MM485::run() {
 							} else {
 								// pkt is a query
 								Packet pkt;
+								uint8_t payload[MAX_DATA_SIZE];
 
+								memcpy(payload, &packet_in->data, packet_in->core.data_size);
+								pkt.core.data_size = parse_packet((packet_data *)payload);
+								memcpy(&pkt.data, payload, pkt.core.data_size);
+#ifdef DEBUG
+	Serial.println("Payload");
+	for(int i=0; i<packet_in->core.data_size; i++) {
+		Serial.print(i);
+		Serial.print(" :");
+		Serial.println(payload[i], HEX);
+	}
+#endif
 								pkt.core.dest = packet_in->core.source;
 								pkt.core.packet_id = packet_in->core.packet_id;
-								pkt.core.data_size = parse_packet((packet_data *)&packet_in->data);
 
 								delay(TX_DELAY);
 
@@ -163,7 +170,9 @@ uint8_t MM485::run() {
 				} else {
 #ifdef DEBUG
 					Serial.print("Invalid stream: ");
-					Serial.println(buffer[0]);
+					Serial.print(buffer[0]);
+					Serial.print(" != ");
+					Serial.println(received);
 #endif
 				}
 				clear_buffer();
@@ -189,8 +198,7 @@ uint8_t MM485::run() {
 			out_delay = millis();
 			delay(2*TX_COMPLETE);
 #ifdef DEBUG
-			Serial.println(freeMemory());
-			Serial.println("PACKET SENT");
+			Serial.println("Packet sent");
 #endif
 		}
 	}

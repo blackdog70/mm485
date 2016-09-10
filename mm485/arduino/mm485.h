@@ -104,7 +104,6 @@ protected:
 	virtual uint16_t crc_calculate(Packet*);
 	virtual uint16_t id_calculate(Packet*);
 	virtual void write(Packet* pkt);
-	virtual uint8_t validate(Packet* pkt);
 };
 
 #endif /* MM485_H_ */
