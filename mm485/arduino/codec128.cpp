@@ -29,7 +29,10 @@ uint8_t enc128(unsigned char* buf, const unsigned char* data, uint8_t size) {
             n = 1;
         }
     }
-    if (msb)
+
+// The following check has hungry of memory, so the calling function will add a closure byte to the data parameter.
+//    if (msb || ((buf_idx + 1) < (int)((size * 1.249) + 0.5)))
+	if (msb)
         buf[buf_idx++] = msb;
 
 //	Serial.println();

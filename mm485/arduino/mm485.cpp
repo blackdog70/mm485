@@ -10,14 +10,14 @@
 #include "codec128.h"
 #include "FreeMemory.h"
 
-#ifdef DEBUG
-	const int rx= 2;		// Arduino Nano
-	const int tx= 3;		// Arduino Nano
-	const int en485 = 4;	// Arduino Nano
-#else
+#ifdef ATTINY
 	const int rx= 2; 		// Pin 7 Attiny85
 	const int tx= 0;		// Pin 5 Attiny85
 	const int en485 = 1;	// Pin 6 Attiny85
+#else
+	const int rx= 2;		// Arduino Nano
+	const int tx= 3;		// Arduino Nano
+	const int en485 = 4;	// Arduino Nano
 #endif
 SoftwareSerial rs485(rx,tx);
 
@@ -36,7 +36,7 @@ MM485::MM485(unsigned char node_id) {
 	retry = 0;
 }
 
-uint8_t MM485::parse_packet(packet_data *data) {
+uint8_t MM485::parse_packet(payload *data) {
 	return 0;
 }
 
@@ -57,22 +57,23 @@ uint16_t MM485::id_calculate(Packet* pkt) {
 }
 
 void MM485::write(Packet* pkt) {
-	unsigned char stream[sizeof(packet_core) + pkt->core.data_size + 1];
+	unsigned char stream[sizeof(packet_core) + pkt->core.data_size + 2];    // +2 it to be sure the char allocation is enough
 
 	pkt->core.source = node_id;
 	pkt->core.crc = crc_calculate(pkt);
+	*((char *)&pkt->payload + pkt->core.data_size) = EOP;				// Add EOP to avoid problem with enc128
 
 #ifdef DEBUG
 	Serial.println("Stream");
 	unsigned char *p = (uint8_t*)pkt;
-	for(unsigned int i=0; i < sizeof(packet_core) + pkt->core.data_size; i++) {
+	for(unsigned int i=0; i < sizeof(packet_core) + pkt->core.data_size + 1; i++) {
 		Serial.print(i);
 		Serial.print(" :");
 		Serial.println(*(p + i), HEX);
 	}
 #endif
 
-	uint8_t size = enc128(stream,(uint8_t*)pkt, sizeof(packet_core) + pkt->core.data_size);
+	uint8_t size = enc128(stream,(uint8_t*)pkt, sizeof(packet_core) + pkt->core.data_size + 1);
 
 #ifdef DEBUG
 	Serial.println("Stream encoded");
@@ -123,10 +124,10 @@ uint8_t MM485::run() {
 #ifdef DEBUG
 							Serial.println("Packet OK");
 #endif
-							if (packet_in->data.code <= COMMAND_PATTERN) {
+							if (packet_in->payload.code <= COMMAND_PATTERN) {
 #ifdef DEBUG
 								Serial.print("Reply: ");
-								Serial.println(packet_in->data.code, HEX);
+								Serial.println(packet_in->payload.code, HEX);
 #endif
 								// pkt is an answer
 								if (packet_in->core.packet_id == packet_out->core.packet_id) {
@@ -135,33 +136,36 @@ uint8_t MM485::run() {
 								}
 							} else {
 								// pkt is a query
-								Packet pkt;
-								uint8_t payload[MAX_DATA_SIZE];
+								unsigned char payload_[MAX_DATA_SIZE];
 
-								memcpy(payload, &packet_in->data, packet_in->core.data_size);
-								pkt.core.data_size = parse_packet((packet_data *)payload);
-								memcpy(&pkt.data, payload, pkt.core.data_size);
+								memcpy(payload_, &packet_in->payload, packet_in->core.data_size);
+								packet_in->core.data_size = parse_packet((payload *)&payload_);
+								packet = (Packet*)realloc(packet_in, sizeof(Packet) + packet_in->core.data_size + 1);  // +1 is for EOP char added in write method
+						    	if (packet != NULL) {
+						    		packet_in = packet;
+									packet_in->core.dest = packet_in->core.source;
+									memcpy((payload*)&(packet_in->payload), payload_, packet_in->core.data_size);
 #ifdef DEBUG
 	Serial.println("Payload");
+	unsigned char *p = (uint8_t*)&(packet_in->payload);
 	for(int i=0; i<packet_in->core.data_size; i++) {
 		Serial.print(i);
 		Serial.print(" :");
-		Serial.println(payload[i], HEX);
+		Serial.println(*(p + i), HEX);
 	}
 #endif
-								pkt.core.dest = packet_in->core.source;
-								pkt.core.packet_id = packet_in->core.packet_id;
+									delay(TX_DELAY);
 
-								delay(TX_DELAY);
-
-								write(&pkt);
+									write(packet_in);
+								}
 							}
 						} else {
 #ifdef DEBUG
 							Serial.println("Invalid packet");
 #endif
 						}
-					} else {
+					}
+					if (packet == NULL) {
 			    		free(packet_in);
 #ifdef DEBUG
 						Serial.println("Memory error!!!");
@@ -205,16 +209,16 @@ uint8_t MM485::run() {
 	return !out_ready;
 }
 
-void MM485::send(uint8_t node_dest, packet_data* data, uint8_t size) {
+void MM485::send(uint8_t node_dest, payload* data, uint8_t size) {
     if (size <= MAX_DATA_SIZE and !out_ready) {
-    	Packet* packet = (Packet*)realloc(packet_out, sizeof(Packet) + size);
+    	Packet* packet = (Packet*)realloc(packet_out, sizeof(Packet) + size + 1); 	// +1 is for EOP char added in write method
     	if (packet != NULL) {
     		packet_out = packet;
 			packet_out->core.dest = node_dest;
 			packet_out->core.data_size = size;
-			memcpy((packet_data*)&packet_out->data, data, size);
+			memcpy((payload*)&packet_out->payload, data, size);
 			packet_out->core.packet_id = id_calculate(packet_out);
-			out_ready = 1;														// packet Ready for transmission
+			out_ready = 1;															// packet Ready for transmission
     	} else {
     		free(packet_out);
 #ifdef DEBUG

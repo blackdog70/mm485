@@ -29,6 +29,7 @@
 #define MAX_PACKET_SIZE 10+MAX_DATA_SIZE+1 // Take care do not exceed 254 chars 255=0xff if for EOM
 #define ACK (uint8_t)0x7d
 #define ERR (uint8_t)0x7e
+#define EOP (uint8_t)0xfe				   // Used to avoid problem with enc128
 #define EOM (uint8_t)0xff
 // QUERY: COMMAND > COMMAND_PATTERN
 // ANSWER: COMMAND <= COMMAND_PATTERN
@@ -52,7 +53,7 @@
 extern SoftwareSerial rs485;
 extern const int en485;
 
-struct packet_data {
+struct payload {
 	uint8_t code;
 };
 
@@ -64,15 +65,15 @@ struct packet_core {
     uint8_t data_size;
 };
 
-#define PACKET_SIZE (sizeof(packet_core) + sizeof(packet_data))
+#define PACKET_SIZE (sizeof(packet_core) + sizeof(payload))
 
 template< typename T >
 struct Packet_egg {
 	packet_core core;
-    T data;
+    T payload;
 };
 
-struct Packet : Packet_egg<packet_data> {};
+struct Packet : Packet_egg<payload> {};
 
 class MM485 {
 public:
@@ -80,7 +81,7 @@ public:
 
 	MM485(unsigned char node_id);
 	virtual ~MM485() {};
-	void send(uint8_t to, packet_data* data, uint8_t size);
+	void send(uint8_t to, payload* payload, uint8_t size);
 	virtual uint8_t run();
 
 private:
@@ -99,7 +100,7 @@ protected:
 	 * fill data with a response for Packet
 	 * return size of data
 	 */
-	virtual uint8_t parse_packet(packet_data *data);
+	virtual uint8_t parse_packet(payload *payload);
 	virtual void parse_ack(Packet*) {};
 	virtual uint16_t crc_calculate(Packet*);
 	virtual uint16_t id_calculate(Packet*);
