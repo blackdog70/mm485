@@ -36,7 +36,7 @@ MM485::MM485(unsigned char node_id) {
 	retry = 0;
 }
 
-uint8_t MM485::parse_packet(payload *data) {
+uint8_t MM485::parse_packet(void *data) {
 	return 0;
 }
 
@@ -61,19 +61,18 @@ void MM485::write(Packet* pkt) {
 
 	pkt->core.source = node_id;
 	pkt->core.crc = crc_calculate(pkt);
-	*((char *)&pkt->payload + pkt->core.data_size) = EOP;				// Add EOP to avoid problem with enc128
 
 #ifdef DEBUG
 	Serial.println("Stream");
 	unsigned char *p = (uint8_t*)pkt;
-	for(unsigned int i=0; i < sizeof(packet_core) + pkt->core.data_size + 1; i++) {
+	for(unsigned int i=0; i < sizeof(packet_core) + pkt->core.data_size; i++) {
 		Serial.print(i);
 		Serial.print(" :");
 		Serial.println(*(p + i), HEX);
 	}
 #endif
 
-	uint8_t size = enc128(stream,(uint8_t*)pkt, sizeof(packet_core) + pkt->core.data_size + 1);
+	uint8_t size = enc128(stream,(uint8_t*)pkt, sizeof(packet_core) + pkt->core.data_size);
 
 #ifdef DEBUG
 	Serial.println("Stream encoded");
@@ -87,7 +86,8 @@ void MM485::write(Packet* pkt) {
 	digitalWrite(en485, HIGH);          			// 485 write mode
 	delay(TX_WAIT);
 	unsigned long tx_start = millis();  			// Used to wait for complete transmission
-	rs485.write(size);
+	rs485.write(size + 1);
+	rs485.write(pkt->core.dest);
 	for(int i = 0; i < size; i++)
 		rs485.write(stream[i]);
 	rs485.write(EOM);
@@ -115,12 +115,16 @@ uint8_t MM485::run() {
 			*chr_in = (uint8_t)rs485.read();
 			if (*chr_in == EOM && chr_in > buffer) {
 				uint8_t received = chr_in - buffer - 1;
-				if (buffer[0] == received) {
+				if ((buffer[0] == received) && (buffer[1] == node_id)) {
 					Packet* packet = (Packet*)realloc(packet_in, received);
 					if (packet != NULL) {
 						packet_in = packet;
-						dec128((unsigned char*)packet_in, (unsigned char*)(buffer + 1), received);
-						if (packet_in->core.crc == crc_calculate(packet_in) && packet_in->core.dest == node_id) {
+#ifdef DEBUG
+							Serial.print("Received: ");
+							Serial.println(received);
+#endif
+						dec128((unsigned char*)packet_in, (unsigned char*)(buffer + 2), received);
+						if (packet_in->core.crc == crc_calculate(packet_in)) {
 #ifdef DEBUG
 							Serial.println("Packet OK");
 #endif
@@ -139,12 +143,12 @@ uint8_t MM485::run() {
 								unsigned char payload_[MAX_DATA_SIZE];
 
 								memcpy(payload_, &packet_in->payload, packet_in->core.data_size);
-								packet_in->core.data_size = parse_packet((payload *)&payload_);
+								packet_in->core.data_size = parse_packet(&payload_);
 								packet = (Packet*)realloc(packet_in, sizeof(Packet) + packet_in->core.data_size + 1);  // +1 is for EOP char added in write method
 						    	if (packet != NULL) {
 						    		packet_in = packet;
 									packet_in->core.dest = packet_in->core.source;
-									memcpy((payload*)&(packet_in->payload), payload_, packet_in->core.data_size);
+									memcpy(&packet_in->payload, payload_, packet_in->core.data_size);
 #ifdef DEBUG
 	Serial.println("Payload");
 	unsigned char *p = (uint8_t*)&(packet_in->payload);
@@ -209,14 +213,14 @@ uint8_t MM485::run() {
 	return !out_ready;
 }
 
-void MM485::send(uint8_t node_dest, payload* data, uint8_t size) {
+void MM485::send(uint8_t node_dest, void* data, uint8_t size) {
     if (size <= MAX_DATA_SIZE and !out_ready) {
     	Packet* packet = (Packet*)realloc(packet_out, sizeof(Packet) + size + 1); 	// +1 is for EOP char added in write method
     	if (packet != NULL) {
     		packet_out = packet;
 			packet_out->core.dest = node_dest;
 			packet_out->core.data_size = size;
-			memcpy((payload*)&packet_out->payload, data, size);
+			memcpy(&packet_out->payload, data, size);
 			packet_out->core.packet_id = id_calculate(packet_out);
 			out_ready = 1;															// packet Ready for transmission
     	} else {

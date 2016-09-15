@@ -53,8 +53,11 @@
 extern SoftwareSerial rs485;
 extern const int en485;
 
-struct payload {
+template<typename T>
+struct t_payload {
 	uint8_t code;
+	T data;
+	uint8_t eop = EOP;
 };
 
 struct packet_core {
@@ -65,15 +68,12 @@ struct packet_core {
     uint8_t data_size;
 };
 
-#define PACKET_SIZE (sizeof(packet_core) + sizeof(payload))
-
-template< typename T >
-struct Packet_egg {
+struct Packet {
 	packet_core core;
-    T payload;
+	t_payload<uint8_t> payload;
 };
 
-struct Packet : Packet_egg<payload> {};
+#define PACKET_SIZE sizeof(Packet)
 
 class MM485 {
 public:
@@ -81,7 +81,7 @@ public:
 
 	MM485(unsigned char node_id);
 	virtual ~MM485() {};
-	void send(uint8_t to, payload* payload, uint8_t size);
+	void send(uint8_t to, void* payload, uint8_t size);
 	virtual uint8_t run();
 
 private:
@@ -100,7 +100,7 @@ protected:
 	 * fill data with a response for Packet
 	 * return size of data
 	 */
-	virtual uint8_t parse_packet(payload *payload);
+	virtual uint8_t parse_packet(void *payload);
 	virtual void parse_ack(Packet*) {};
 	virtual uint16_t crc_calculate(Packet*);
 	virtual uint16_t id_calculate(Packet*);
