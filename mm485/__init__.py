@@ -42,7 +42,6 @@ def mdelay(value):
     return time.time()
 
 
-
 class NullPort(object):
     is_open = True
     in_waiting = 0
@@ -85,7 +84,7 @@ def enc128(data):
             lsb, msb = enc(msb, 0, 0)
             v.append(lsb)
             n = 1
-    if msb:
+    if msb or len(v) < round(((len(data) / 7) * 8) + 0.5):
         v.append(msb)
     return v
 
@@ -170,13 +169,13 @@ class Packet(object):
 
     def serialize(self):
         return self.crc + self.packet_id + self.source + self.dest + self.length + self.data
-        
+
     def decode(self, data):
         logging.info('Decode stream %s', data, extra=self.logextra)
         decoded = bytes(dec128(data))
         logging.debug("Decoded stream: %s", decoded, extra=self.logextra)
         return self.deserialize(decoded)
-    
+
     def encode(self):
         serialized = self.serialize()
         logging.info('Encode stream %s', serialized, extra=self.logextra)
@@ -203,7 +202,7 @@ class MM485(threading.Thread):
         self._msg = None
         self._msg_in = None
         self._crc_in = 0
-        self.tx_complete = ((MAX_PACKET_SIZE / (self._port.baudrate / 1000.0 / 8.0)) + RX_DELAY) # ms
+        self.tx_complete = ((MAX_PACKET_SIZE / (self._port.baudrate / 1000.0 / 8.0)) + RX_DELAY)  # ms
         self.logextra = {'node': node_id}
 
     def parse_query(self, packet):
@@ -254,7 +253,7 @@ class MM485(threading.Thread):
                 for pkt in self.queue_out:
                     self.write(pkt)
                     pkt.timeout = time.time()
-                    mdelay(2*self.tx_complete)
+                    mdelay(2 * self.tx_complete)
 
     def write(self, pkt):
         """Send a packet to serial port
@@ -267,7 +266,8 @@ class MM485(threading.Thread):
         self._port.setRTS(False)
         mdelay(TX_DELAY)
         tx_start = time.time()
-        self._port.write([len(msg)])
+        self._port.write([len(msg) + 1])
+        self._port.write([pkt.dest])
         self._port.write(msg)
         self._port.write([self.TERMINATOR])
         while (time.time() - tx_start) < (self.tx_complete / 1000.0):
@@ -280,10 +280,10 @@ class MM485(threading.Thread):
         :param stream: stream of data
         :return:
         """
-        if stream[0] != len(stream[1:]):
+        if (stream[0] != len(stream[1:]) and (bytes([stream[1]]) != self._node_id)):
             logging.info("Data stream is invalid", extra=self.logextra)
             return
-        pkt = Packet().decode(stream[1:])
+        pkt = Packet().decode(stream[2:])
         logging.debug('Packet format: %s', pkt, extra=self.logextra)
         if len(self.queue_in) < MAX_QUEUE_IN_LEN:
             if pkt.validate() and pkt.dest == self._node_id:
@@ -320,7 +320,7 @@ class MM485(threading.Thread):
                 logging.warning("Running error: %s", e, extra=self.logextra)
         pass
 
-    #TODO: To be completed
+    # TODO: To be completed
     def join(self, timeout=None):
         """Stop the main thread"""
         with self.lock:
@@ -352,13 +352,14 @@ class MM485(threading.Thread):
             time.sleep(0.01)
         return self._port.in_waiting == 0
 
+
 if __name__ == "__main__":
     # print(hex(CRC16().calculate(bytes([1, 6, 4, 0, 0xAC, 0x29, 0x70, 0x45]))))
 
-    orig = [2, 1, 0x85, 0xf9, 0x03, 0x06, 0, 0x80, 0x85, 0xf9]
+    orig = [0xCE, 0x56, 0xCE, 0x56, 0x3, 0x1, 0x3, 0xA6, 0xB7, 0x3, 0xFE, ]
     enc = enc128(orig)
 
-    print([(hex(i), chr(i)) for i in enc])
+    print([hex(i) for i in enc])
     # enc = [2, 2, 0x38, 0x48, 0x66, 0, 1, 0, 0x7C, 0x7F, 0x2D, 0x2B, 0x64, 0x21, 0x5A, 0x7F]
 
     dec = dec128(enc)
