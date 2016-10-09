@@ -3,7 +3,11 @@ import time
 import struct
 import logging
 
-from mm485 import MM485, Packet, CRC16
+from mm485 import DomuNet, Packet, CRC16
+
+#define ACK (uint8_t)0x7d
+#define ERR (uint8_t)0x7e
+
 
 # TODO: Test corrispondenza valori TEST == NUMERO
 # PARAMETERS MUST BE VALUE <= 0x7f
@@ -15,9 +19,12 @@ PARAMETERS = {
     "DHT": 0x05,
     "PIR": 0x06,
     "LUX": 0x07,
-    "HBT": 0x7d,
-    "RAM": 0x7e,
-    "PONG": 0x7f,
+    "START": 0x7a,
+    "HBT": 0x7b,
+    "RAM": 0x7c,
+    "PONG": 0x7d,
+    "ACK": 0x7e,
+    "ERR": 0x7f,
     0x01: "SWITCH",
     0x02: "LIGHT",
     0x03: "BINARY_OUT",
@@ -25,14 +32,20 @@ PARAMETERS = {
     0x05: "DHT",
     0x06: "PIR",
     0x07: "LUX",
-    0x7d: "HBT",
-    0x7e: "RAM",
-    0x7f: "PONG",
+    0x7a: "START",
+    0x7b: "HBT",
+    0x7c: "RAM",
+    0x7d: "PONG",
+    0x7e: "ACK",
+    0x7f: "ERR",
 }
+
+ANSWERS = PARAMETERS
 
 # TODO: Test corrispondenza valori TEST == NUMERO
 # QUERIES MUST BE VALUE > 0x7f
 QUERIES = {
+    "START": 0x80,
     "PING": 0x81,
     "RESET": 0x82,
     "CONFIG": 0x88,
@@ -46,6 +59,7 @@ QUERIES = {
     "LIGHT": 0xA4,
     "PIR": 0xA5,
     "LUX": 0xA6,
+    0x80: "START",
     0x81: "PING",
     0x82: "RESET",
     0x88: "CONFIG",
@@ -62,35 +76,40 @@ QUERIES = {
 }
 
 
-class Ping(MM485):
+class Ping(DomuNet):
     def parse_query(self, packet):
-        msg = super(Ping, self).parse_query(packet)
-        with self.lock:
-            # logging.info("Parsing command %s", QUERIES[packet.data[0]])
-            if packet.data[0] == QUERIES['PING']:
-                print("Pong")
-            if packet.data == 'Test':
-                msg = 'Tested'
-            if packet.data[0] == QUERIES['EMS']:  # ems
-                print(packet.data[1], struct.unpack("f",packet.data[2:]))
-            if packet.data[0] == QUERIES['DHT']:  # TEMP & HUM
-                print("Temperatura: ", struct.unpack("h", packet.data[1:3])[0] / 10.0)
-                print("Umidità: ", struct.unpack("h", packet.data[3:5])[0] / 10.0)
-            if packet.data[0] == QUERIES['HBT']:
-                print(packet.data)
-            if packet.data[0] == QUERIES['PIR']:
-                print("Pir: ", struct.unpack("h", packet.data[1:3])[0])
-            if packet.data[0] == QUERIES['LUX']:
-                print("Lux: ", struct.unpack("h", packet.data[1:3])[0])
+        try:
+            msg = ANSWERS['ACK']
+            with self.lock:
+                # logging.info("Parsing command %s", QUERIES[packet.data[0]])
+                if packet.data[0] == QUERIES['PING']:
+                    print("Pong")
+                if packet.data[0] == QUERIES['EMS']:  # ems
+                    print(packet.data[1], struct.unpack("f",packet.data[2:]))
+                if packet.data[0] == QUERIES['DHT']:  # TEMP & HUM
+                    print("Temperatura: ", struct.unpack("h", packet.data[1:3])[0] / 10.0)
+                    print("Umidità: ", struct.unpack("h", packet.data[3:5])[0] / 10.0)
+                if packet.data[0] == QUERIES['HBT']:
+                    print(packet.data)
+                if packet.data[0] == QUERIES['PIR']:
+                    print("Pir: ", struct.unpack("b", packet.data[1:2])[0])
+                if packet.data[0] == QUERIES['LUX']:
+                    print("Lux: ", struct.unpack("h", packet.data[1:3])[0])
+                if packet.data[0] == QUERIES['START']:
+                    print("Started")
+        except Exception as e:
+            raise e
         return msg
 
     def parse_answer(self, packet):
-        # logging.info("Parsing command %s", str(ANSWERS[packet.data[0]]))
-        if packet.data[0] == PARAMETERS['RAM']:
-            print("RAM FREE:", struct.unpack("h", packet.data[1:3])[0])
-        if packet.data[0] == PARAMETERS['PONG']:
-            print("PONG")
-
+        try:
+            # logging.info("Parsing command %s", str(ANSWERS[packet.data[0]]))
+            if packet.data[0] == PARAMETERS['RAM']:
+                print(time.time(), "RAM FREE:", struct.unpack("h", packet.data[1:3])[0])
+            if packet.data[0] == PARAMETERS['PONG']:
+                print("PONG")
+        except Exception as e:
+            raise e
 
 if __name__ == '__main__':
     # ser = serial_for_url('/dev/ttyUSB0', rtscts=True, baudrate=38400)
@@ -112,12 +131,13 @@ if __name__ == '__main__':
         # a.send(2, bytearray((CONFIG, 0, SENSOR, 5)))
         # a.send(2, bytearray((QUERIES['CONFIG'], PARAMETERS['DHT'], 10)))
         # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['HBT'], 30)))
-        # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['PIR'], 5)))
+        # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['PIR'], 1)))
         # a.send(3, bytearray((QUERIES['CONFIG'], PARAMETERS['LUX'], 2)))
         # a.send(2, bytearray((QUERIES['RESET'],)))
         while True:
-            # a.send(3, bytearray((QUERIES['MEM'],)))
+            # a.send(2, bytearray((QUERIES['MEM'],)))
+            a.send(3, bytearray((QUERIES['MEM'],)))
             print("Loop")
-            time.sleep(2)
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
