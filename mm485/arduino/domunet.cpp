@@ -8,32 +8,27 @@
 #include <domunet.h>
 #include "Arduino.h"
 #include "codec128.h"
-#include "FreeMemory.h"
+//#include "FreeMemory.h"
 
 #ifdef ATTINY
 	const int rx= 2; 		// Pin 7 Attiny85
 	const int tx= 0;		// Pin 5 Attiny85
 	const int en485 = 1;	// Pin 6 Attiny85
 #else
-	const int rx= 2;		// Arduino Nano
-	const int tx= 3;		// Arduino Nano
-	const int en485 = 4;	// Arduino Nano
+	const int rx= 12;		// Arduino Nano
+	const int tx= 11;		// Arduino Nano
+	const int en485 = 13;	// Arduino Nano
 #endif
 SoftwareSerial rs485(rx,tx);
 
-// FIXME: Baudrate da variabile o costante
-unsigned long BYTE_TIMING = (BAUDRATE / 1000) / 8;
-unsigned long TX_COMPLETE = (unsigned int)(float(float(MAX_PACKET_SIZE) / BYTE_TIMING));
-unsigned long WAIT_FOR_BUS = BYTE_TIMING * NODE_ID;
-
-// TODO: node_id può essere eliminato in favore della costante NODE_ID
-DomuNet::DomuNet(unsigned char node_id) {
-	// TODO Auto-generated constructor stub
+DomuNet::DomuNet(uint8_t node_id, uint32_t baudrate) {
 	DomuNet::node_id = node_id;
 	buffer[0] = 0;
 //	packet_in = (Packet*)malloc(MAX_PACKET_SIZE);
 //	packet_out = (Packet*)malloc(MAX_PACKET_SIZE);
 	bus_state = READY;
+	wait_for_bus = ((baudrate / 1000) / 8) * node_id;
+	rs485.begin(baudrate);
 }
 
 //uint8_t MM485::parse_packet(void *data) {
@@ -84,7 +79,7 @@ void DomuNet::clear_buffer() {
 
 uint8_t DomuNet::bus_ready() {
 	unsigned long start = millis();
-	while ((micros() - start) < WAIT_FOR_BUS) {};
+	while ((micros() - start) < wait_for_bus) {};
 	return rs485.available() < 3;
 }
 

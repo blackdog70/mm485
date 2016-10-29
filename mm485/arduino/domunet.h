@@ -9,7 +9,7 @@
 #define MM485_H_
 
 //#include <packet.h>
-#include "settings.h"
+#define DEBUG
 #include <crc16.h>
 
 /*
@@ -71,7 +71,7 @@ class DomuNet {
 public:
 	uint8_t node_id;
 
-	DomuNet(unsigned char node_id);
+	DomuNet(uint8_t node_id, uint32_t baudrate);
 	virtual ~DomuNet() {};
 	uint8_t send(uint8_t to, void* payload, uint8_t size);
 //	virtual void run();
@@ -86,6 +86,7 @@ protected:
 	Packet packet_in;
 	Packet packet_out;
 	uint8_t bus_state;
+	uint32_t wait_for_bus;
 
 //	virtual uint8_t parse_packet(void *payload);
 	virtual void parse_ack(Packet*) {};
