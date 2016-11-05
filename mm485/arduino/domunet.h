@@ -9,7 +9,7 @@
 #define MM485_H_
 
 //#include <packet.h>
-#define DEBUG
+#include "settings.h"
 #include <crc16.h>
 
 /*
@@ -36,7 +36,7 @@
 #define MAX_BUFFER_SIZE (NUM_PACKET*MAX_PACKET_SIZE)
 #define SIZE_QUEUE 2
 // #define BUS_MAX_WAIT 300UL // time in milliseconds
-#define PACKET_TIMEOUT 30UL // millis
+#define PACKET_TIMEOUT 100UL // millis
 #define TX_DELAY 3
 //#define PACKET_DELAY 5 // millis, in source the total delay will be PACKET_DELAY * node_id
 #define PACKET_DELAY 20UL // millis, in source the total delay will be PACKET_DELAY * node_id
@@ -50,10 +50,12 @@ extern const int en485;
 
 struct base_payload {
 	uint8_t code;
+	base_payload(uint8_t c):code(c) {};
 };
 
 struct max_size_payload : base_payload {
 	uint8_t data[MAX_DATA_SIZE];
+	max_size_payload():base_payload(0) {};
 };
 
 struct packet_core {

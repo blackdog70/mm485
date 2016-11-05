@@ -15,8 +15,8 @@
 	const int tx= 0;		// Pin 5 Attiny85
 	const int en485 = 1;	// Pin 6 Attiny85
 #else
-	const int rx= 12;		// Arduino Nano
-	const int tx= 11;		// Arduino Nano
+	const int rx= 11;		// Arduino Nano
+	const int tx= 12;		// Arduino Nano
 	const int en485 = 13;	// Arduino Nano
 #endif
 SoftwareSerial rs485(rx,tx);
@@ -38,21 +38,20 @@ DomuNet::DomuNet(uint8_t node_id, uint32_t baudrate) {
 void DomuNet::write(Packet* pkt) {
 	pkt->core.source = node_id;
 
+	uint8_t size = sizeof(packet_core) + pkt->core.data_size;
+	unsigned char *s = (unsigned char *)pkt;
+	uint16_t chksum = ModRTU_CRC((char*)s, size);
+
 #ifdef DEBUG
 	Serial.println("Stream");
 	Serial.print("Size ");
-	Serial.println(sizeof(packet_core) + pkt->core.data_size);
-	unsigned char *p = (uint8_t*)pkt;
-	for(unsigned int i=0; i < sizeof(packet_core) + pkt->core.data_size; i++) {
+	Serial.println(size);
+	for(unsigned int i=0; i < size; i++) {
 		Serial.print(i);
 		Serial.print(" :");
-		Serial.println(*(p + i), HEX);
+		Serial.println(*(s + i), HEX);
 	}
 #endif
-
-	uint8_t size = sizeof(packet_core) + pkt->core.data_size;
-	char *s = (char *)pkt;
-	uint16_t chksum = ModRTU_CRC(s, size);
 
 	digitalWrite(en485, HIGH);          			// 485 write mode
 //	unsigned long tx_start = millis();  			// Used to wait for complete transmission
@@ -74,7 +73,7 @@ void DomuNet::write(Packet* pkt) {
 
 void DomuNet::clear_buffer() {
 	buffer[0] = 0;		// Clear buffer
-//	rs485.flush();		// Clear serial buffer
+	rs485.flush();		// Clear serial buffer
 }
 
 uint8_t DomuNet::bus_ready() {
@@ -93,11 +92,12 @@ uint8_t DomuNet::receive() {
 	int ch = rs485.read();
 	while(ch != 0x08) {
 #ifdef DEBUG
+		Serial.print("Discard: ");
 		Serial.println(ch, HEX);
 #endif
 		if (rs485.available() < 3) {
 #ifdef DEBUG
-			Serial.print("0x08 Not found.");
+			Serial.println("0x08 Not found.");
 #endif
 			return 0;
 		}
@@ -105,7 +105,7 @@ uint8_t DomuNet::receive() {
 	}
 	if (rs485.read() != 0x70) {
 #ifdef DEBUG
-		Serial.print("0x70 Not found.");
+		Serial.println("0x70 Not found.");
 #endif
 		return 0;
 	}
