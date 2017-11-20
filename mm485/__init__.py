@@ -1,6 +1,7 @@
 # coding: utf-8
 import logging
 import logging.config
+import struct
 import threading
 import time
 from struct import pack
@@ -22,7 +23,7 @@ MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE
 COMMAND_PATTERN = 0b01111111
 
 FORMAT = '%(asctime)-15s %(levelname)-8s [%(module)s:%(funcName)s:%(lineno)s] [%(node)s] : %(message)s'
-logging.basicConfig(level=logging.INFO, format=FORMAT)
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
 
 
 def mdelay(value):
@@ -57,9 +58,12 @@ class NullPort(object):
 
 class Packet(object):
     def __init__(self, data=None):
-        self.source = data[0] if data is not None else 0
-        self.dest = data[1] if data is not None else 0
-        self.data = data[2:] if data is not None else 0
+        # self.source = data[0] if data is not None else 0
+        # self.dest = data[1] if data is not None else 0
+        # self.data = data[2:] if data is not None else 0
+        self.source = struct.unpack("h", data[0:2])[0] if data is not None else 0
+        self.dest = struct.unpack("h", data[2:4])[0] if data is not None else 0
+        self.data = data[4:] if data is not None else 0
 
     @staticmethod
     def _serialize(data):
@@ -70,8 +74,8 @@ class Packet(object):
         return ret
 
     def serialize(self):
-        r = bytearray(self._serialize(self.source))
-        r += self._serialize(self.dest)
+        r = bytearray(self._serialize(struct.pack('h', self.source)))
+        r += self._serialize(struct.pack('h', self.dest))
         r += self._serialize(self.data)
         return r
 
@@ -255,6 +259,6 @@ class DomuNet(threading.Thread):
 
 
 if __name__ == "__main__":
-    a = Packet(b'\x01\x02\x03\x01\x03\x02\x01\x01')
+    a = Packet(b'\x01\x00\x02\x00\x03\x01\x03\x02\x01\x01')
     b = a
     print(b)
