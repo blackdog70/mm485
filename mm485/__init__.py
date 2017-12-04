@@ -9,6 +9,7 @@ from struct import pack
 from PyCRC.CRC16 import CRC16
 # from docutils.nodes import paragraph
 # from twisted.application.internet import _ReconnectingProtocolProxy
+# from __builtin__ import len
 
 MAX_RETRY = 3
 PACKET_TIMEOUT = 1  # seconds
@@ -121,11 +122,11 @@ class DomuNet(threading.Thread):
         packet.source = self.node_id
         packet.dest = pkt_in.source
         packet.data = data
-        logging.info('Found %s', packet.data, extra=self.logextra)
+        logging.debug('Found %s', packet.data, extra=self.logextra)
         mdelay(TX_DELAY)
         self.write(packet)
         logging.debug("REPLY-->%s", packet.serialize(), extra=self.logextra)
-        logging.info('Msg completed', extra=self.logextra)
+        logging.debug('Msg completed', extra=self.logextra)
 
     # TODO: Valutare necessità di gestione dei retry
     def parse_queue_out(self):
@@ -137,14 +138,14 @@ class DomuNet(threading.Thread):
                 for pkt in queue_out:
                     if self.bus_ready():
                         self.write(pkt)
-                        logging.info("OUT-->%s", pkt.serialize(), extra=self.logextra)
+                        logging.debug("OUT-->%s", pkt.serialize(), extra=self.logextra)
                         timeout = time.time()
                         received = None
                         while not received and ((time.time() - timeout) <= PACKET_TIMEOUT):
                             received = self.receive()
                         if received:
                             received = Packet(received)
-                            logging.info('Received %s as answer', received.data, extra=self.logextra)
+                            logging.debug('Received %s as answer', received.data, extra=self.logextra)
                             self.parse_answer(received)
                             self.queue_out.remove(pkt)
                         else:
@@ -165,10 +166,11 @@ class DomuNet(threading.Thread):
             size = self.port.read()[0]
             if size:
                 data = self.port.read(size)  # FIXME: A volte il pacchetto in arrivo ha source e dest OK e size = 0
+                logging.debug("IN-->%s", [hex(i) for i in data], extra=self.logextra)
                 if len(data) == size:
                     crc = self.port.read(2)
                     if crc == self.CRC(data):
-                        if data[1] == self.node_id:
+                        if struct.unpack("h", data[2:4])[0] == self.node_id:
                             logging.debug("IN-->%s", [hex(i) for i in data], extra=self.logextra)
                             self.bus_busy = False
                             return data
@@ -177,7 +179,7 @@ class DomuNet(threading.Thread):
                     else:
                         raise Exception("CRC error!!")
                 else:
-                    raise Exception("Size is wrong!!")
+                    raise Exception("Size %s is wrong!!", len(data))
             else:
                 raise Exception("Size is zero!!")
         # else:
