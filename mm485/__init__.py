@@ -14,10 +14,10 @@ from PyCRC.CRC16 import CRC16
 MAX_RETRY = 3
 PACKET_TIMEOUT = 1  # seconds
 TX_DELAY = 10  # milliseconds
-MAX_QUEUE_OUT_LEN = 13
+MAX_QUEUE_OUT_LEN = 250  # 13
 MAX_QUEUE_IN_LEN = 10
-MAX_DATA_SIZE = 10
-MAX_PACKET_SIZE = 8 + MAX_DATA_SIZE
+MAX_DATA_SIZE = 12
+MAX_PACKET_SIZE = 5 + MAX_DATA_SIZE
 
 # QUERY: COMMAND > COMMAND_PATTERN
 # ANSWER: COMMAND <= COMMAND_PATTERN
@@ -93,7 +93,7 @@ class DomuNet(threading.Thread):
         self._stop_domunet = threading.Event()
         self._pause_domunet = threading.Event()
         # self.queue_in = []
-        self.queue_out = set()
+        self.queue_out = list()
         self.buffer = bytearray()
         self._msg = None
         self._msg_in = None
@@ -132,10 +132,10 @@ class DomuNet(threading.Thread):
     def parse_queue_out(self):
         """Parse output queue for packet to send"""
         with self.lock:
+            # return
             if self.queue_out:
                 logging.debug("Parse queue out: %s", [str(q) for q in self.queue_out], extra=self.logextra)
-                queue_out = set(self.queue_out)
-                for pkt in queue_out:
+                for pkt in list(self.queue_out):
                     if self.bus_ready():
                         self.write(pkt)
                         logging.debug("OUT-->%s", pkt.serialize(), extra=self.logextra)
@@ -253,7 +253,9 @@ class DomuNet(threading.Thread):
                         packet.source = self.node_id
                         packet.dest = dest_node_id
                         packet.data = data
-                        self.queue_out.add(packet)
+                        self.queue_out.append(packet)
+                else:
+                    logging.critical("Queue out full", extra=self.logextra)
             else:
                 logging.critical("Command must be query type (>%s)", COMMAND_PATTERN, extra=self.logextra)
         else:
