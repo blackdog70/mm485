@@ -103,6 +103,16 @@ class DomuNet(threading.Thread):
         self.wait_for_bus = self.byte_timing * self.node_id
         self.tx_complete = MAX_PACKET_SIZE * self.byte_timing  # ms FIXME: Forse è il caso di fare una moltiplicazione anzichè una division
         self.logextra = {'node': node_id}
+        self.hexfile = ""
+        
+        self.logger = logging.getLogger(__name__)
+        self.handler = None
+
+    def log_handler(self, handler):
+        if self.handler:
+            self.logger.removeHandler(self.handler)
+        self.handler = handler
+        self.logger.addHandler(handler)
 
     def parse_query(self, packet):
         pass
@@ -118,15 +128,12 @@ class DomuNet(threading.Thread):
         if data == 0:
             # don't send an answer if packet is unrecognized
             return
-        packet = Packet()
-        packet.source = self.node_id
-        packet.dest = pkt_in.source
-        packet.data = data
-        logging.debug('Found %s', packet.data, extra=self.logextra)
-        mdelay(TX_DELAY)
+        packet = self.prepare_packet(pkt_in.source, data)
+        self.logger.debug('Found %s', packet.data, extra=self.logextra)
+#        mdelay(TX_DELAY)
         self.write(packet)
-        logging.debug("REPLY-->%s", packet.serialize(), extra=self.logextra)
-        logging.debug('Msg completed', extra=self.logextra)
+        self.logger.debug("REPLY-->%s", packet.serialize(), extra=self.logextra)
+        self.logger.debug('Msg completed', extra=self.logextra)
 
     # TODO: Valutare necessità di gestione dei retry
     def parse_queue_out(self):
@@ -134,48 +141,48 @@ class DomuNet(threading.Thread):
         with self.lock:
             # return
             if self.queue_out:
-                logging.debug("Parse queue out: %s", [str(q) for q in self.queue_out], extra=self.logextra)
+                self.logger.debug("Parse queue out: %s", [str(q) for q in self.queue_out], extra=self.logextra)
                 for pkt in list(self.queue_out):
                     if self.bus_ready():
                         self.write(pkt)
-                        logging.debug("OUT-->%s", pkt.serialize(), extra=self.logextra)
+                        self.logger.debug("OUT-->%s", pkt.serialize(), extra=self.logextra)
                         timeout = time.time()
                         received = None
                         while not received and ((time.time() - timeout) <= PACKET_TIMEOUT):
                             received = self.receive()
                         if received:
                             received = Packet(received)
-                            logging.debug('Received %s as answer', received.data, extra=self.logextra)
+                            self.logger.debug('Received %s as answer', received.data, extra=self.logextra)
                             self.parse_answer(received)
                             self.queue_out.remove(pkt)
                         else:
                             self.port.flushInput()
                             raise Exception('Timeout!! {}'.format(pkt.serialize()))
                     else:
-                        logging.info("Bus busy!!", extra=self.logextra)
+                        self.logger.info("Bus busy!!", extra=self.logextra)
                         break
 
     def receive(self):
         header_found = False
         while self.port.in_waiting >= 3 and not header_found:
-            logging.debug("Looking for header: %s", self.port.in_waiting, extra=self.logextra)
+            self.logger.debug("Looking for header: %s", self.port.in_waiting, extra=self.logextra)
             read = self.port.read(2)
             header_found = (read == b'\x08\x70')
         if header_found:
-            logging.debug("In waiting len: %s", self.port.in_waiting, extra=self.logextra)
+            self.logger.debug("In waiting len: %s", self.port.in_waiting, extra=self.logextra)
             size = self.port.read()[0]
             if size:
                 data = self.port.read(size)  # FIXME: A volte il pacchetto in arrivo ha source e dest OK e size = 0
-                logging.debug("IN-->%s", [hex(i) for i in data], extra=self.logextra)
+                self.logger.debug("IN-->%s", [hex(i) for i in data], extra=self.logextra)
                 if len(data) == size:
                     crc = self.port.read(2)
                     if crc == self.CRC(data):
                         if struct.unpack("h", data[2:4])[0] == self.node_id:
-                            logging.debug("IN-->%s", [hex(i) for i in data], extra=self.logextra)
+                            self.logger.debug("IN-->%s", [hex(i) for i in data], extra=self.logextra)
                             self.bus_busy = False
                             return data
                         self.bus_busy = (data[3] > COMMAND_PATTERN)
-                        logging.debug("Bus state: %s", "BUSY" if self.bus_busy else "READY", extra=self.logextra)
+                        self.logger.debug("Bus state: %s", "BUSY" if self.bus_busy else "READY", extra=self.logextra)
                     else:
                         raise Exception("CRC error!!")
                 else:
@@ -183,7 +190,7 @@ class DomuNet(threading.Thread):
             else:
                 raise Exception("Size is zero!!")
         # else:
-        #     logging.debug("Header not found!!", extra=self.logextra)
+        #     self.logger.debug("Header not found!!", extra=self.logextra)
         return None
 
     # FIXME: Se troppo veloce si disallinea, perdo la risposta al messaggio in corso ed inizio ad ottenere in risposta
@@ -191,7 +198,7 @@ class DomuNet(threading.Thread):
     def write(self, pkt):
         pkt = pkt.serialize()
         cksum = self.CRC(pkt)
-        self.port.setRTS(False)
+#        self.port.setRTS(False)
         tx_start = time.time()
         self.port.write(b'\x08\x70')
         self.port.write([len(pkt)])
@@ -199,7 +206,7 @@ class DomuNet(threading.Thread):
         self.port.write(cksum)
         while (time.time() - tx_start) < self.tx_complete:
             pass
-        self.port.setRTS(True)
+#        self.port.setRTS(True)
 
     def run(self):
         while not self._stop_domunet.isSet():
@@ -213,34 +220,34 @@ class DomuNet(threading.Thread):
                         self.parse_packet(packet)
                     else:
                         self.parse_queue_out()
-                    time.sleep(0.05)
                 except Exception as e:
                     # FIXME: argument must be an int, or have a fileno() method.
-                    logging.error("Running error: %s", e, extra=self.logextra)
-        pass
+                    self.logger.error("Running error: %s", e, extra=self.logextra)
+            time.sleep(0.05)
+        self.port.close()
+        self.logger.removeHandler(self.handler)
 
     def stop(self):
         """Stop the main thread"""
-        with self.lock:
-            self._stop_domunet.set()
+#        with self.lock:
+        self._stop_domunet.set()
 
     def pause(self):
         """pause the main thread"""
-        with self.lock:
-            self._pause_domunet.set()
+#        with self.lock:
+        self._pause_domunet.set()
 
     def resume(self):
         """resume the main thread"""
-        with self.lock:
-            self._pause_domunet.clear()
-
+#        with self.lock:
+        self._pause_domunet.clear()
 
     def bus_ready(self):
         if self.bus_busy:
             return False
         mdelay(self.wait_for_bus)
-        logging.debug("Bus ready status: %s", self.port.in_waiting, extra=self.logextra)
-        return self.port.in_waiting  < 3
+        self.logger.debug("Bus ready status: %s", self.port.in_waiting == 0, extra=self.logextra)
+        return self.port.in_waiting < 3
 
     def send(self, dest_node_id, data):
         """Push a packet on output queue"""
@@ -249,17 +256,21 @@ class DomuNet(threading.Thread):
             if command > COMMAND_PATTERN:
                 if len(self.queue_out) < MAX_QUEUE_OUT_LEN:
                     with self.lock:
-                        packet = Packet()
-                        packet.source = self.node_id
-                        packet.dest = dest_node_id
-                        packet.data = data
+                        packet = self.prepare_packet(dest_node_id, data)
                         self.queue_out.append(packet)
                 else:
-                    logging.critical("Queue out full", extra=self.logextra)
+                    self.logger.critical("Queue out full", extra=self.logextra)
             else:
-                logging.critical("Command must be query type (>%s)", COMMAND_PATTERN, extra=self.logextra)
+                self.logger.critical("Command must be query type (>%s)", COMMAND_PATTERN, extra=self.logextra)
         else:
-            logging.critical("The data exceeds the maximum size of %s characters", MAX_DATA_SIZE, extra=self.logextra)
+            self.logger.critical("The data exceeds the maximum size of %s characters", MAX_DATA_SIZE, extra=self.logextra)
+
+    def prepare_packet(self, dest_node_id, data):
+        packet = Packet()
+        packet.source = self.node_id
+        packet.dest = dest_node_id
+        packet.data = data
+        return packet
 
 
 if __name__ == "__main__":
